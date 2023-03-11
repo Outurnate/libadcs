@@ -1,0 +1,11 @@
+[package]
+name = "bcder-derive"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+derive_utils = "0.12.0"
+bcder = "0.7.1"

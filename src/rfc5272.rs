@@ -1,5 +1,7 @@
 use std::{ops::{DerefMut, Deref}, io::Write};
+use auto_enums::auto_enum;
 use bcder::{Captured, encode::{self, PrimitiveContent, Values, sequence_as, set_as, sequence, set}, Tag, Mode};
+use bcder_derive::Values;
 use cryptographic_message_syntax::{Oid, asn1::rfc5652::ContentInfo};
 use x509_certificate::rfc2986::CertificationRequest;
 
@@ -69,6 +71,14 @@ macro_rules! DeriveValues
       {
         self.encode_ref_as(self.default_tag())
       }
+
+      pub fn encode_der(&self) -> Result<Vec<u8>, std::io::Error>
+      {
+        let mut buffer = vec![];
+        self.clone().encode().write_encoded(Mode::Der, &mut buffer)?;
+    
+        Ok(buffer)
+      }
     }
 
     impl Values for $name
@@ -115,14 +125,6 @@ impl PKIData
       cms_sequence: vec![],
       other_msg_sequence: vec![]
     }
-  }
-
-  pub fn encode_der(&self) -> Result<Vec<u8>, std::io::Error>
-  {
-    let mut buffer = vec![];
-    self.clone().encode().write_encoded(Mode::Der, &mut buffer)?;
-
-    Ok(buffer)
   }
 }
 
@@ -221,30 +223,32 @@ impl TaggedRequest
     }
   }
 
+  #[auto_enum(Values)]
   pub fn encode_as(self, tag: Tag) -> impl Values
   {
     match self
     {
       TaggedRequest::TaggedCertificationRequest(tcr) => tcr.encode_as(tag),
-      TaggedRequest::CertificateRequestMessage(crm) => crm.encode_as(tag),
+      TaggedRequest::CertificateRequestMessage(crm) => crm,
       TaggedRequest::OtherRequestMessage { body_part_id, request_message_type, request_message_value } => sequence_as(tag, (
         body_part_id.encode(),
         request_message_type.encode(),
-        request_message_value.encode()
+        request_message_value
       ))
     }
   }
 
+  #[auto_enum(Values)]
   pub fn encode_ref_as(&self, tag: Tag) -> impl Values + '_
   {
     match self
     {
-      TaggedRequest::TaggedCertificationRequest(tcr) => tcr.encode_as(tag),
-      TaggedRequest::CertificateRequestMessage(crm) => crm.encode_as(tag),
+      TaggedRequest::TaggedCertificationRequest(tcr) => tcr.encode_ref_as(tag),
+      TaggedRequest::CertificateRequestMessage(crm) => crm,
       TaggedRequest::OtherRequestMessage { body_part_id, request_message_type, request_message_value } => sequence_as(tag, (
         body_part_id.encode(),
         request_message_type.encode(),
-        request_message_value.encode()
+        request_message_value
       ))
     }
   }
@@ -301,7 +305,7 @@ impl TaggedContentInfo
     Tag::SEQUENCE
   }
 
-  fn encode_as(self, tag: Tag) -> impl encode::Values
+  pub fn encode_as(self, tag: Tag) -> impl encode::Values
   {
     encode::sequence_as(tag,
     (
@@ -337,7 +341,7 @@ impl OtherMsg
     Tag::SEQUENCE
   }
 
-  fn encode_as(self, tag: Tag) -> impl encode::Values
+  pub fn encode_as(self, tag: Tag) -> impl encode::Values
   {
     encode::sequence_as(tag,
     (
