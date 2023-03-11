@@ -1,144 +1,10 @@
+mod rfc5272;
+
 use base64::{Engine as _, engine::general_purpose};
-use bcder::{Captured, encode::{self, PrimitiveContent}, Tag};
-use cryptographic_message_syntax::{SignedDataBuilder, Oid, Bytes, SignerBuilder, asn1::rfc5652::ContentInfo};
+use cryptographic_message_syntax::{SignedDataBuilder, Oid, Bytes, SignerBuilder};
 use x509_certificate::{rfc2986::CertificationRequest, X509CertificateBuilder, KeyAlgorithm, EcdsaCurve, InMemorySigningKeyPair, KeyInfoSigner};
 
-struct PKIData
-{
-  control_sequence: Vec<TaggedAttribute>,
-  req_sequence: Vec<TaggedRequest>,
-  cms_sequence: Vec<TaggedContentInfo>,
-  other_msg_sequence: Vec<OtherMsg>
-}
-
-impl PKIData
-{
-  pub fn encode(self) -> impl encode::Values
-  {
-    self.encode_as(Tag::SEQUENCE)
-  }
-
-  pub fn encode_as(self, tag: Tag) -> impl encode::Values
-  {
-    encode::sequence_as(tag,
-    (
-      encode::set_as(tag, self.control_sequence),
-      encode::set_as(tag, self.req_sequence),
-      encode::set_as(tag, self.cms_sequence),
-      encode::set_as(tag, self.other_msg_sequence)
-    ))
-  }
-}
-
-struct TaggedAttribute
-{
-  body_part_id: BodyPartID,
-  attr_type: Oid,
-  attr_values: Vec<Captured>
-}
-
-impl encode::Values for TaggedAttribute
-{
-  fn encode(self) -> impl encode::Values
-  {
-    self.encode_as(Tag::SEQUENCE)
-  }
-
-  fn encode_as(self, tag: Tag) -> impl encode::Values
-  {
-    encode::sequence_as(tag,
-    (
-      self.body_part_id.encode(),
-      self.attr_type.encode(),
-      encode::set_as(tag, self.attr_values)
-    ))
-  }
-}
-
-enum TaggedRequest
-{
-  TaggedCertificationRequest(TaggedCertificationRequest),
-  CertificateRequestMessage(Captured),
-  orm
-  {
-     body_part_id: BodyPartID,
-     request_message_type: Oid,
-     request_message_value: ()
-  }
-}
-
-struct TaggedCertificationRequest
-{
-  body_part_id: BodyPartID,
-  certification_request: CertificationRequest
-}
-
-impl TaggedCertificationRequest
-{
-  pub fn encode(self) -> impl encode::Values
-  {
-    self.encode_as(Tag::SEQUENCE)
-  }
-
-  pub fn encode_as(self, tag: Tag) -> impl encode::Values
-  {
-    encode::sequence_as(tag,
-    (
-      self.body_part_id.encode(),
-      self.certification_request.encode()
-    ))
-  }
-}
-
-struct TaggedContentInfo
-{
-  body_part_id: BodyPartID,
-  content_info: ContentInfo
-}
-
-impl TaggedContentInfo
-{
-  pub fn encode(self) -> impl encode::Values
-  {
-    self.encode_as(Tag::SEQUENCE)
-  }
-
-  pub fn encode_as(self, tag: Tag) -> impl encode::Values
-  {
-    encode::sequence_as(tag,
-    (
-      self.body_part_id.encode(),
-      self.content_info.encode()
-    ))
-  }
-}
-
-struct OtherMsg
-{
-  body_part_id: BodyPartID,
-  other_msg_type: Oid,
-  other_msg_value: Captured
-}
-
-impl OtherMsg
-{
-  pub fn encode(self) -> impl encode::Values
-  {
-    self.encode_as(Tag::SEQUENCE)
-  }
-
-  pub fn encode_as(self, tag: Tag) -> impl encode::Values
-  {
-    encode::sequence_as(tag,
-    (
-      self.body_part_id.encode(),
-      self.other_msg_type.encode(),
-      self.other_msg_value.encode()
-    ))
-  }
-}
-
-type BodyPartID = i64;
+use crate::rfc5272::PKIData;
 
 fn main()
 {
@@ -152,7 +18,7 @@ fn main()
 
 fn cms_chew(request: CertificationRequest, signer: &dyn KeyInfoSigner)
 {
-  let csr = request.encode_der().unwrap();
+  let csr = PKIData::new(request.clone()).encode_der().unwrap();
 
   let cms_builder = SignedDataBuilder::default();
   let cms = cms_builder
