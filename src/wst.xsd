@@ -8,6 +8,13 @@
   elementFormDefault="qualified">
   <xs:import namespace="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" schemaLocation="wsse.xsd" />
   <xs:import namespace="http://schemas.microsoft.com/windows/pki/2009/01/enrollment" schemaLocation="wstep.xsd" />
+  <xs:complexType name="BodyType">
+    <!-- I wish i could use a choice type... -->
+    <xs:sequence>
+      <xs:element type="wst:RequestSecurityTokenType" name="RequestSecurityToken" minOccurs="0" maxOccurs="1" />
+      <xs:element type="wst:RequestSecurityTokenResponseCollectionType" name="RequestSecurityTokenResponseCollection" minOccurs="0" maxOccurs="1" />
+    </xs:sequence>
+  </xs:complexType>
   <!--<xs:element name="RequestSecurityToken" type="wst:RequestSecurityTokenType" />-->
   <xs:complexType name="RequestSecurityTokenType">
     <xs:sequence>

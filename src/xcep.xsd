@@ -4,6 +4,13 @@
   xmlns:xcep="http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy"
   targetNamespace="http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy"
   elementFormDefault="qualified">
+  <xs:complexType name="BodyType">
+    <!-- I wish i could use a choice type... -->
+    <xs:sequence>
+      <xs:element type="xcep:GetPoliciesType" name="GetPolicies" minOccurs="0" maxOccurs="1" />
+      <xs:element type="xcep:GetPoliciesResponseType" name="GetPoliciesResponse" minOccurs="0" maxOccurs="1" />
+    </xs:sequence>
+  </xs:complexType>
   <xs:complexType name="Client">
     <xs:sequence>
       <xs:element minOccurs="1" maxOccurs="1" name="lastUpdate" nillable="true" type="xs:dateTime"/>
