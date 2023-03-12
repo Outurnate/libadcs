@@ -1,5 +1,5 @@
 use yaserde::ser::to_string;
-use schemas::*;
+use crate::schemas::Envelope;
 
 mod schemas;
 
