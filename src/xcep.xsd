@@ -16,15 +16,15 @@
       <xs:element minOccurs="1" maxOccurs="1" name="requestFilter" nillable="true" type="xcep:RequestFilter"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:element name="GetPolicies" type="xcep:GetPoliciesType" />
+  <!--<xs:element name="GetPolicies" type="xcep:GetPoliciesType" />-->
   <xs:complexType name="RequestFilter">
     <xs:sequence>
-      <xs:element minOccurs="1" maxOccurs="1" name="policyOIDs" nillable="true" type="xcep:ArrayOfString"/>
+      <xs:element minOccurs="1" maxOccurs="1" name="policyOIDs" nillable="true" type="xcep:PolicyOIDsType"/>
       <xs:element minOccurs="1" maxOccurs="1" name="clientVersion" nillable="true" type="xs:int"/>
       <xs:element minOccurs="1" maxOccurs="1" name="serverVersion" nillable="true" type="xs:int"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:complexType name="ArrayOfString">
+  <xs:complexType name="PolicyOIDsType">
     <xs:sequence>
       <xs:element minOccurs="0" maxOccurs="unbounded" name="oid" type="xs:string"/>
     </xs:sequence>
@@ -32,21 +32,21 @@
   <xs:complexType name="GetPoliciesResponseType">
     <xs:sequence>
       <xs:element minOccurs="1" maxOccurs="1" name="response" nillable="true" type="xcep:Response"/>
-      <xs:element minOccurs="1" maxOccurs="1" name="cAs" nillable="true" type="xcep:ArrayOfCA"/>
-      <xs:element minOccurs="1" maxOccurs="1" name="oIDs" nillable="true" type="xcep:ArrayOfOID"/>
+      <xs:element minOccurs="1" maxOccurs="1" name="cAs" nillable="true" type="xcep:CAsType"/>
+      <xs:element minOccurs="1" maxOccurs="1" name="oIDs" nillable="true" type="xcep:OIDsType"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:element name="GetPoliciesResponse" type="xcep:GetPoliciesResponseType" />
+  <!--<xs:element name="GetPoliciesResponse" type="xcep:GetPoliciesResponseType" />-->
   <xs:complexType name="Response">
     <xs:sequence>
       <xs:element minOccurs="0" maxOccurs="1" name="policyID" type="xs:string"/>
       <xs:element minOccurs="1" maxOccurs="1" name="policyFriendlyName" nillable="true" type="xs:string"/>
       <xs:element minOccurs="1" maxOccurs="1" name="nextUpdateHours" nillable="true" type="xs:unsignedInt"/>
       <xs:element minOccurs="1" maxOccurs="1" name="policiesNotChanged" nillable="true" type="xs:boolean"/>
-      <xs:element minOccurs="1" maxOccurs="1" name="policies" nillable="true" type="xcep:ArrayOfCertificateEnrollmentPolicy"/>
+      <xs:element minOccurs="1" maxOccurs="1" name="policies" nillable="true" type="xcep:CertificateEnrollmentPoliciesType"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:complexType name="ArrayOfCertificateEnrollmentPolicy">
+  <xs:complexType name="CertificateEnrollmentPoliciesType">
     <xs:sequence>
       <xs:element minOccurs="0" maxOccurs="unbounded" name="policy" type="xcep:CertificateEnrollmentPolicy"/>
     </xs:sequence>
@@ -54,11 +54,11 @@
   <xs:complexType name="CertificateEnrollmentPolicy">
     <xs:sequence>
       <xs:element minOccurs="1" maxOccurs="1" name="policyOIDReference" type="xs:int"/>
-      <xs:element minOccurs="1" maxOccurs="1" name="cAs" nillable="true" type="xcep:ArrayOfInt"/>
+      <xs:element minOccurs="1" maxOccurs="1" name="cAs" nillable="true" type="xcep:CAReferencesType"/>
       <xs:element minOccurs="0" maxOccurs="1" name="attributes" type="xcep:Attributes"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:complexType name="ArrayOfInt">
+  <xs:complexType name="CAReferencesType">
     <xs:sequence>
       <xs:element minOccurs="0" maxOccurs="unbounded" name="cAReference" type="xs:int"/>
     </xs:sequence>
@@ -71,7 +71,7 @@
       <xs:element minOccurs="0" maxOccurs="1" name="permission" type="xcep:EnrollmentPermission"/>
       <xs:element minOccurs="0" maxOccurs="1" name="privateKeyAttributes" type="xcep:PrivateKeyAttributes"/>
       <xs:element minOccurs="0" maxOccurs="1" name="revision" type="xcep:Revision"/>
-      <xs:element minOccurs="1" maxOccurs="1" name="supersededPolicies" nillable="true" type="xcep:ArrayOfString2"/>
+      <xs:element minOccurs="1" maxOccurs="1" name="supersededPolicies" nillable="true" type="xcep:CommonNamesType"/>
       <xs:element minOccurs="1" maxOccurs="1" name="privateKeyFlags" nillable="true" type="xs:unsignedInt"/>
       <xs:element minOccurs="1" maxOccurs="1" name="subjectNameFlags" nillable="true" type="xs:unsignedInt"/>
       <xs:element minOccurs="1" maxOccurs="1" name="enrollmentFlags" nillable="true" type="xs:unsignedInt"/>
@@ -79,7 +79,7 @@
       <xs:element minOccurs="1" maxOccurs="1" name="hashAlgorithmOIDReference" nillable="true" type="xs:int"/>
       <xs:element minOccurs="1" maxOccurs="1" name="rARequirements" nillable="true" type="xcep:RARequirements"/>
       <xs:element minOccurs="1" maxOccurs="1" name="keyArchivalAttributes" nillable="true" type="xcep:KeyArchivalAttributes"/>
-      <xs:element minOccurs="1" maxOccurs="1" name="extensions" nillable="true" type="xcep:ArrayOfExtension"/>
+      <xs:element minOccurs="1" maxOccurs="1" name="extensions" nillable="true" type="xcep:ExtensionsType"/>
     </xs:sequence>
   </xs:complexType>
   <xs:complexType name="CertificateValidity">
@@ -101,10 +101,10 @@
       <xs:element minOccurs="1" maxOccurs="1" name="keyUsageProperty" nillable="true" type="xs:unsignedInt"/>
       <xs:element minOccurs="1" maxOccurs="1" name="permissions" nillable="true" type="xs:string"/>
       <xs:element minOccurs="1" maxOccurs="1" name="algorithmOIDReference" nillable="true" type="xs:int"/>
-      <xs:element minOccurs="1" maxOccurs="1" name="cryptoProviders" nillable="true" type="xcep:ArrayOfString1"/>
+      <xs:element minOccurs="1" maxOccurs="1" name="cryptoProviders" nillable="true" type="xcep:ProvidersType"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:complexType name="ArrayOfString1">
+  <xs:complexType name="ProvidersType">
     <xs:sequence>
       <xs:element minOccurs="0" maxOccurs="unbounded" name="provider" type="xs:string"/>
     </xs:sequence>
@@ -115,7 +115,7 @@
       <xs:element minOccurs="1" maxOccurs="1" name="minorRevision" nillable="true" type="xs:unsignedInt"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:complexType name="ArrayOfString2">
+  <xs:complexType name="CommonNamesType">
     <xs:sequence>
       <xs:element minOccurs="0" maxOccurs="unbounded" name="commonName" type="xs:string"/>
     </xs:sequence>
@@ -123,11 +123,11 @@
   <xs:complexType name="RARequirements">
     <xs:sequence>
       <xs:element minOccurs="1" maxOccurs="1" name="rASignatures" type="xs:unsignedInt"/>
-      <xs:element minOccurs="1" maxOccurs="1" name="rAEKUs" nillable="true" type="xcep:ArrayOfInt1"/>
-      <xs:element minOccurs="1" maxOccurs="1" name="rAPolicies" nillable="true" type="xcep:ArrayOfInt1"/>
+      <xs:element minOccurs="1" maxOccurs="1" name="rAEKUs" nillable="true" type="xcep:OIDReferencesType"/>
+      <xs:element minOccurs="1" maxOccurs="1" name="rAPolicies" nillable="true" type="xcep:OIDReferencesType"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:complexType name="ArrayOfInt1">
+  <xs:complexType name="OIDReferencesType">
     <xs:sequence>
       <xs:element minOccurs="0" maxOccurs="unbounded" name="oIDReference" type="xs:int"/>
     </xs:sequence>
@@ -138,7 +138,7 @@
       <xs:element minOccurs="1" maxOccurs="1" name="symmetricAlgorithmKeyLength" type="xs:unsignedInt"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:complexType name="ArrayOfExtension">
+  <xs:complexType name="ExtensionsType">
     <xs:sequence>
       <xs:element minOccurs="0" maxOccurs="unbounded" name="extension" type="xcep:Extension"/>
     </xs:sequence>
@@ -150,20 +150,20 @@
       <xs:element minOccurs="1" maxOccurs="1" name="value" nillable="true" type="xs:base64Binary"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:complexType name="ArrayOfCA">
+  <xs:complexType name="CAsType">
     <xs:sequence>
       <xs:element minOccurs="0" maxOccurs="unbounded" name="cA" type="xcep:CA"/>
     </xs:sequence>
   </xs:complexType>
   <xs:complexType name="CA">
     <xs:sequence>
-      <xs:element minOccurs="0" maxOccurs="1" name="uris" type="xcep:ArrayOfCAURI"/>
+      <xs:element minOccurs="0" maxOccurs="1" name="uris" type="xcep:CAURIsType"/>
       <xs:element minOccurs="0" maxOccurs="1" name="certificate" type="xs:base64Binary"/>
       <xs:element minOccurs="1" maxOccurs="1" name="enrollPermission" type="xs:boolean"/>
       <xs:element minOccurs="1" maxOccurs="1" name="cAReferenceID" type="xs:int"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:complexType name="ArrayOfCAURI">
+  <xs:complexType name="CAURIsType">
     <xs:sequence>
       <xs:element minOccurs="0" maxOccurs="unbounded" name="cAURI" type="xcep:CAURI"/>
     </xs:sequence>
@@ -176,7 +176,7 @@
       <xs:element minOccurs="1" maxOccurs="1" name="renewalOnly" nillable="true" type="xs:boolean"/>
     </xs:sequence>
   </xs:complexType>
-  <xs:complexType name="ArrayOfOID">
+  <xs:complexType name="OIDsType">
     <xs:sequence>
       <xs:element minOccurs="0" maxOccurs="unbounded" name="oID" type="xcep:OID"/>
     </xs:sequence>

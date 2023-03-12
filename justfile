@@ -1,4 +1,4 @@
 docserver:
-  killall webfsd || true
   cargo doc
+  killall webfsd || true
   webfsd -r target/doc

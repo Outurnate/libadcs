@@ -14,7 +14,7 @@
       </xs:extension>
     </xs:simpleContent>
   </xs:complexType>
-  <xs:element name="BinarySecurityToken" type="wsse:BinarySecurityTokenType" />
+  <!--<xs:element name="BinarySecurityToken" type="wsse:BinarySecurityTokenType" />-->
   <xs:complexType name="EncodedString">
     <xs:simpleContent>
       <xs:extension base="wsse:AttributedString">
@@ -26,7 +26,6 @@
     <xs:simpleContent>
       <xs:extension base="xs:string">
         <xs:attribute ref="wsu:Id"/>
-        <xs:anyAttribute namespace="##other" processContents="lax"/>
       </xs:extension>
     </xs:simpleContent>
   </xs:complexType>

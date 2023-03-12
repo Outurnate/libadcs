@@ -16,8 +16,8 @@ fn main()
   println!("cargo:rustc-link-lib=dcerpc");
   println!("cargo:rustc-link-lib=msicpr");
   println!("cargo:rustc-link-search=native={}", install_path);
-  println!("cargo:rerun-if-changed=src/wrapper.h");
-  println!("cargo:rerun-if-changed=src/ms-icpr.idl");
+  //println!("cargo:rerun-if-changed=src/wrapper.h");
+  //println!("cargo:rerun-if-changed=src/ms-icpr.idl");
   Command::new("meson")
     .arg("setup")
     .arg(build_path)
