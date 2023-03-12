@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wsdl:definitions 
+  targetNamespace="http://docs.oasis-open.org/ws-sx/ws-trust/200512/"
+  xmlns:wst="http://docs.oasis-open.org/ws-sx/ws-trust/200512/" 
+  xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" 
+  xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <wsdl:types>
+    <xs:schema targetNamespace="http://docs.oasis-open.org/ws-sx/ws-trust/200512/">
+      <xs:import namespace="http://docs.oasis-open.org/ws-sx/ws-trust/200512/" schemaLocation="wst.xsd"/>
+    </xs:schema>
+  </wsdl:types>
+  <wsdl:message name="RequestSecurityTokenMsg">
+    <wsdl:part name="request" element="wst:RequestSecurityToken" />
+  </wsdl:message>
+  <wsdl:message name="RequestSecurityTokenResponseMsg">
+    <wsdl:part name="response" element="wst:RequestSecurityTokenResponse" />
+  </wsdl:message>
+  <wsdl:portType name="SecurityTokenService">
+    <wsdl:operation name="RequestSecurityToken">
+      <wsdl:input message="wst:RequestSecurityTokenMsg"/>
+      <wsdl:output message="wst:RequestSecurityTokenResponseMsg"/>
+    </wsdl:operation>
+  </wsdl:portType>
+</wsdl:definitions>
