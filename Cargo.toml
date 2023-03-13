@@ -23,7 +23,5 @@ bcder-derive = { path = "bcder-derive" }
 ring = "0.16.20"
 yaserde_derive = "0.8.0"
 yaserde = "0.8.0"
-xml-schema-derive = { path = "xml-schema/xml_schema_derive" }
-xml-schema = { path = "xml-schema/xml_schema" }
 xml-rs = "0.8.4"
 log = "0.4.17"

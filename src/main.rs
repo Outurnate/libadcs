@@ -1,3 +1,4 @@
+use schemas::{BodyType, RequestSecurityTokenType};
 use yaserde::ser::to_string;
 use crate::schemas::Envelope;
 
@@ -5,7 +6,7 @@ mod schemas;
 
 fn main()
 {
-  let mut model = Envelope::default();
-  model.content.body.get_policies = Some(GetPoliciesType::default());
-  println!("{}", to_string(&model).unwrap());
+  let mut envelope = Envelope::default();
+  envelope.content.body = BodyType::RequestSecurityToken(RequestSecurityTokenType::default());
+  println!("{}", to_string(&envelope).unwrap());
 }

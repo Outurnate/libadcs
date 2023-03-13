@@ -4,6 +4,3 @@
 [submodule "libdcerpc-sys/dcerpc"]
 	path = libdcerpc-sys/dcerpc
 	url = git@github.com:Outurnate/dcerpc.git
-[submodule "xml-schema"]
-	path = xml-schema
-	url = git@github.com:Outurnate/xml-schema.git
