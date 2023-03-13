@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [ "libdcerpc-sys", "cryptography-rs/cryptographic-message-syntax", "cryptography-rs/x509-certificate", "bcder-derive", "xml-schema/xml_schema", "xml-schema/xml_schema_derive" ]
+members = [ "libdcerpc-sys", "cryptography-rs/cryptographic-message-syntax", "cryptography-rs/x509-certificate", "bcder-derive" ]
 
 [dependencies]
 cross-krb5 = "0.3.0"
