@@ -4,14 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [ "libdcerpc-sys", "cryptography-rs/cryptographic-message-syntax", "cryptography-rs/x509-certificate", "bcder-derive" ]
+members = [ "libdcerpc-sys", "libdcerpc", "cryptography-rs/cryptographic-message-syntax", "cryptography-rs/x509-certificate", "bcder-derive" ]
 
-[dependencies]
-cross-krb5 = "0.3.0"
-ldap3 = { version = "0.11.1", default-features = false, features = ["gssapi", "tls", "sync"] }
-libdcerpc-sys = { path = "libdcerpc-sys" }
+[workspace.dependencies]
 thiserror = "1.0.38"
 hex = "0.4.3"
+
+[dependencies]
+thiserror.workspace = true
+hex.workspace = true
+cross-krb5 = "0.3.0"
+ldap3 = { version = "0.11.1", default-features = false, features = ["gssapi", "tls", "sync"] }
+libdcerpc = { path = "libdcerpc" }
 cryptographic-message-syntax = { path = "cryptography-rs/cryptographic-message-syntax" }
 x509-certificate = { path = "cryptography-rs/x509-certificate" }
 bitflags = "1.3.2"

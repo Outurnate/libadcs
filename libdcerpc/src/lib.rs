@@ -1,14 +1,14 @@
-use std::ffi::OsStr;
+use std::ffi::{OsStr,CString,NulError};
 use std::ptr::null_mut;
-use std::ffi::CString;
 use std::os::unix::prelude::OsStrExt;
-use std::ffi::NulError;
 use std::fmt::Display;
 use hex::ToHex;
 use thiserror::Error;
 
+pub mod ms_icpr;
+
 #[derive(Error, Debug)]
-enum RpcError
+pub enum RpcError
 {
   #[error("error converting string: early null terminator")]
   StringError(#[from] NulError),
@@ -16,7 +16,7 @@ enum RpcError
   DceError(String)
 }
 
-enum Protocol
+pub enum Protocol
 {
   NamedPipes,
   Tcp,
@@ -159,10 +159,22 @@ impl Drop for RpcBinding
   }
 }
 
-/*fn main() -> Result<(), RpcError>
+fn clone_to_utf16(string: &str, null_terminate: bool) -> Vec<u16>
 {
-  let mut binding = RpcBinding::new(DceString::compose_binding(Protocol::Tcp, OsStr::new("192.168.100.155"))?)?;
-  unsafe { binding.ep_resolve(libdcerpc_sys::ICertPassage_v0_0_c_ifspec).unwrap(); }
-  Ok(())
+  let mut result = string.encode_utf16().into_iter().collect::<Vec<u16>>();
+  if null_terminate
+  {
+    result.push(0);
+  }
+  result
 }
-*/
+
+fn clone_to_utf16_le(string: &str, null_terminate: bool) -> Vec<u8>
+{
+  let mut result = string.encode_utf16().into_iter().flat_map(|c| c.to_le_bytes()).collect::<Vec<u8>>();
+  if null_terminate
+  {
+    result.push(0);
+  }
+  result
+}
