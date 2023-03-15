@@ -2,10 +2,11 @@
 name = "libdcerpc"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 thiserror.workspace = true
 hex.workspace = true
+bitflags.workspace = true
 libdcerpc-sys = { path = "../libdcerpc-sys" }
-bitflags = "2.0.0"
 byteorder = "1.4.3"
