@@ -1,6 +1,3 @@
-[submodule "cryptography-rs"]
-	path = cryptography-rs
-	url = git@github.com:Outurnate/cryptography-rs.git
 [submodule "libdcerpc-sys/dcerpc"]
 	path = libdcerpc-sys/dcerpc
 	url = git@github.com:Outurnate/dcerpc.git

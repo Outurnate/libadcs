@@ -128,6 +128,7 @@ fn check_revision(input: u8, revision: u8) -> Result<(), SDDLError>
 bitflags!
 {
   #[repr(transparent)]
+  #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
   pub struct AccessMask: u32
   {
     const ADS_RIGHT_DS_CREATE_CHILD   = 0x0000_0001;
@@ -141,9 +142,9 @@ bitflags!
     const WRITE_OWNER                 = 0x0008_0000;
     const SYNCHRONIZE                 = 0x0010_0000;
     const STANDARD_RIGHTS_REQUIRED    = 0x000F_0000;
-    const STANDARD_RIGHTS_READ        = Self::READ_CONTROL.bits;
-    const STANDARD_RIGHTS_WRITE       = Self::READ_CONTROL.bits;
-    const STANDARD_RIGHTS_EXECUTE     = Self::READ_CONTROL.bits;
+    const STANDARD_RIGHTS_READ        = Self::READ_CONTROL.bits();
+    const STANDARD_RIGHTS_WRITE       = Self::READ_CONTROL.bits();
+    const STANDARD_RIGHTS_EXECUTE     = Self::READ_CONTROL.bits();
     const SPECIFIC_RIGHTS_ALL         = 0x0000_FFFF;
     const STANDARD_RIGHTS_ALL         = 0x001F_0000;
   }
@@ -165,6 +166,7 @@ impl AccessMask
 bitflags!
 {
   #[repr(transparent)]
+  #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
   pub struct AccessObjectFlags: u32
   {
     const NONE                              = 0x0000_0000;
@@ -189,6 +191,7 @@ impl AccessObjectFlags
 bitflags!
 {
   #[repr(transparent)]
+  #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
   pub struct ACEFlags: u8
   {
     const NONE                  = 0b0000_0000;
@@ -199,8 +202,8 @@ bitflags!
     const INHERITED             = 0b0001_0000;
     const SUCCESSFUL_ACCESS     = 0b0100_0000;
     const FAILED_ACCESS         = 0b1000_0000;
-    const AUDIT_FLAGS           = Self::FAILED_ACCESS.bits | Self::SUCCESSFUL_ACCESS.bits;
-    const INHERITANCE_FLAGS     = Self::INHERIT_ONLY.bits | Self::NO_PROPAGATE_INHERITE.bits | Self::CONTAINER_INHERIT.bits | Self::OBJECT_INHERIT.bits;
+    const AUDIT_FLAGS           = Self::FAILED_ACCESS.bits() | Self::SUCCESSFUL_ACCESS.bits();
+    const INHERITANCE_FLAGS     = Self::INHERIT_ONLY.bits() | Self::NO_PROPAGATE_INHERITE.bits() | Self::CONTAINER_INHERIT.bits() | Self::OBJECT_INHERIT.bits();
   }
 }
 
@@ -220,6 +223,7 @@ impl ACEFlags
 bitflags!
 {
   #[repr(transparent)]
+  #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
   pub struct ControlFlags: u16
   {
     const OWNER_DEFAULTED           = 0b0000_0000_0000_0001;
@@ -298,7 +302,7 @@ impl AccessObject
   }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub struct SID
 {
   identifier_authority: [u8; 6],
@@ -445,8 +449,8 @@ impl ACE
       0x02 => Ok(ACEType::SystemAudit),
       0x03 => Ok(ACEType::SystemAlarm),
       0x04 => Ok(ACEType::AccessAllowedCompound),
-      0x05 => Ok(ACEType::AccessAllowedObject(AccessObject::new(&remaining)?)),
-      0x06 => Ok(ACEType::AccessDeniedObject(AccessObject::new(&remaining)?)),
+      0x05 => Ok(ACEType::AccessAllowedObject(AccessObject::new(remaining)?)),
+      0x06 => Ok(ACEType::AccessDeniedObject(AccessObject::new(remaining)?)),
       0x07 => Ok(ACEType::SystemAuditObject),
       0x08 => Ok(ACEType::SystemAlarmObject),
       0x09 => Ok(ACEType::AccessAllowedCallback),
@@ -466,7 +470,7 @@ impl ACE
 
   fn new(input: &[u8]) -> Result<Self, SDDLError>
   {
-    let size = le_field_u16(&input, "ace_size", 2)?;
+    let size = le_field_u16(input, "ace_size", 2)?;
     Ok(Self
     {
       ace_type: Self::parse_ace_type(field_u8(input, "ace_type", 0)?, field_subslice(input, "ace_contents", 4)?)?,
@@ -490,13 +494,13 @@ impl SDDL
 {
   pub fn new(input: &[u8]) -> Result<Self, SDDLError>
   {
-    check_revision(field_u8(&input, "revision", 0)?, 1)?;
+    check_revision(field_u8(input, "revision", 0)?, 1)?;
     let control = ControlFlags::field(input, 2)?;
     if !control.contains(ControlFlags::SELF_RELATIVE) { return Err(SDDLError::NotSelfRelative) }
-    let sacl_offset = le_field_u32(&input, "sacl_offset", 12)? as usize;
-    let dacl_offset = le_field_u32(&input, "dacl_offset", 16)? as usize;
-    let owner_offset = le_field_u32(&input, "owner_offset", 4)? as usize;
-    let group_offset = le_field_u32(&input, "group_offset", 8)? as usize;
+    let sacl_offset = le_field_u32(input, "sacl_offset", 12)? as usize;
+    let dacl_offset = le_field_u32(input, "dacl_offset", 16)? as usize;
+    let owner_offset = le_field_u32(input, "owner_offset", 4)? as usize;
+    let group_offset = le_field_u32(input, "group_offset", 8)? as usize;
     Ok(Self
     {
       control,

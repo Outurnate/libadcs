@@ -1,33 +1,67 @@
-mod rfc5272;
-
-use base64::{Engine as _, engine::general_purpose};
-use bcder::OctetString;
-use cryptographic_message_syntax::{SignedDataBuilder, Oid, Bytes, SignerBuilder, asn1::rfc5652::SignerIdentifier};
-use ring::digest::{digest, SHA1_FOR_LEGACY_USE_ONLY};
-use x509_certificate::{rfc2986::CertificationRequest, X509CertificateBuilder, KeyAlgorithm, EcdsaCurve, InMemorySigningKeyPair, KeyInfoSigner};
+use cryptographic_message_syntax::{SignedDataBuilder, Oid, Bytes, SignerBuilder, asn1::rfc5652::{SignerIdentifier, IssuerAndSerialNumber, CertificateSerialNumber}, CmsError};
+use ring::digest::{digest, SHA256};
+use signature::Error;
+use x509_certificate::{rfc2986::CertificationRequest, KeyAlgorithm, KeyInfoSigner, Signature, Signer, Sign, SignatureAlgorithm, X509CertificateError, DigestAlgorithm, rfc3280::Name};
 
 use crate::rfc5272::PKIData;
 
-fn main()
+pub fn wrap_in_cmc(request: CertificationRequest) -> Result<Vec<u8>, CmsError>
 {
-  let (keypair, _) = InMemorySigningKeyPair::generate_random(KeyAlgorithm::Ecdsa(EcdsaCurve::Secp384r1)).unwrap();
-  let mut request = X509CertificateBuilder::new(KeyAlgorithm::Ecdsa(EcdsaCurve::Secp384r1));
-  request.subject().append_common_name_utf8_string("eggs benedict").unwrap();
-  request.create_certificate_signing_request(&keypair).unwrap();
+  let subject_identifier = SignerIdentifier::IssuerAndSerialNumber(IssuerAndSerialNumber
+    {
+      issuer: Name::default(),
+      serial_number: CertificateSerialNumber::from(0)
+    });
+  let csr = PKIData::new(request).encode_der()?;
 
-  cms_chew(request.create_certificate_signing_request(&keypair).unwrap(), &keypair);
-}
-
-fn cms_chew(request: CertificationRequest, signer: &dyn KeyInfoSigner)
-{
-  let digest = digest(&SHA1_FOR_LEGACY_USE_ONLY, &request.certificate_request_info.subject_public_key_info.subject_public_key.octet_bytes());
-  let subject_identifier = SignerIdentifier::SubjectKeyIdentifier(OctetString::new(Bytes::copy_from_slice(digest.as_ref())));
-  let csr = PKIData::new(request).encode_der().unwrap();
-
-  let cms = SignedDataBuilder::default()
+  SignedDataBuilder::default()
     .content_inline(csr)
     .content_type(Oid(Bytes::from_static(&[43u8, 6u8, 1u8, 5u8, 5u8, 7u8, 12u8, 2u8])))
-    .signer(SignerBuilder::new_with_signer_identifier(signer, subject_identifier))
-    .build_der().unwrap();
-  println!("{}", general_purpose::STANDARD_NO_PAD.encode(cms));
+    .signer(SignerBuilder::new_with_signer_identifier(& NullKeyInfoSigner {}, subject_identifier))
+    .build_der()
+}
+
+struct NullKeyInfoSigner;
+
+impl KeyInfoSigner for NullKeyInfoSigner {}
+
+impl Signer<Signature> for NullKeyInfoSigner
+{
+  fn try_sign(&self, msg: &[u8]) -> Result<Signature, Error>
+  {
+    Ok(digest(&SHA256, msg).as_ref().to_vec().into())
+  }
+}
+
+impl Sign for NullKeyInfoSigner
+{
+  fn sign(&self, msg: &[u8]) -> Result<(Vec<u8>, SignatureAlgorithm), X509CertificateError>
+  {
+    Ok((digest(&SHA256, msg).as_ref().to_vec(), self.signature_algorithm()?))
+  }
+
+  fn key_algorithm(&self) -> Option<KeyAlgorithm>
+  {
+    unimplemented!()
+  }
+
+  fn public_key_data(&self) -> Bytes
+  {
+    unimplemented!()
+  }
+
+  fn signature_algorithm(&self) -> Result<SignatureAlgorithm, X509CertificateError>
+  {
+    SignatureAlgorithm::from_oid_and_digest_algorithm(&Oid(Bytes::from_static(&[43, 6, 1, 5, 5, 7, 6, 2])), DigestAlgorithm::Sha256)
+  }
+
+  fn private_key_data(&self) -> Option<Vec<u8>>
+  {
+    unimplemented!()
+  }
+
+  fn rsa_primes(&self) -> Result<Option<(Vec<u8>, Vec<u8>)>, X509CertificateError>
+  {
+    unimplemented!()
+  }
 }

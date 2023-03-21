@@ -1,6 +1,6 @@
 use std::{ops::{DerefMut, Deref}, io::Write};
 use auto_enums::auto_enum;
-use bcder::{Captured, encode::{self, PrimitiveContent, Values, sequence_as, set_as, sequence, set}, Tag, Mode};
+use bcder::{Captured, encode::{self, PrimitiveContent, Values, sequence_as, set}, Tag, Mode};
 use bcder_derive::Values;
 use cryptographic_message_syntax::{Oid, asn1::rfc5652::ContentInfo};
 use x509_certificate::rfc2986::CertificationRequest;
