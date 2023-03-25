@@ -1,3 +1,8 @@
+#![warn(clippy::expect_used)]
+#![warn(clippy::unwrap_used)]
+#![forbid(unsafe_code)]
+#![allow(dead_code)]
+
 mod ldap;
 mod sddl;
 mod ldap_client;

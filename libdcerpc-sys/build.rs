@@ -1,3 +1,5 @@
+#![allow(clippy::suspicious_command_arg_space)]
+
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
