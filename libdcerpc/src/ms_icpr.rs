@@ -1,4 +1,3 @@
-use std::ffi::OsStr;
 use std::ptr::null_mut;
 use bitflags::bitflags;
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -27,6 +26,7 @@ bitflags!
 
 pub struct CertificateServerResponse
 {
+  pub request_id: Option<u32>,
   pub disposition: Option<u32>,
   pub certificate_chain: Option<Vec<u8>>,
   pub entity_certificate: Option<Vec<u8>>,
@@ -40,7 +40,7 @@ pub struct CertPassage
 
 impl CertPassage
 {
-  pub fn new(protocol: Protocol, netaddr: &OsStr, spn: &OsStr) -> Result<Self, RpcError>
+  pub fn new(protocol: Protocol, netaddr: &str, spn: &str) -> Result<Self, RpcError>
   {
     let mut binding =
     {
@@ -52,7 +52,7 @@ impl CertPassage
     Ok(Self { binding })
   }
 
-  pub fn cert_server_request(&mut self, dw_flags: DWFlags, authority: &str, request_id: &mut u32, attributes: &str, request: &[u8]) -> CertificateServerResponse
+  pub fn cert_server_request(&mut self, dw_flags: DWFlags, authority: &str, request_id: Option<u32>, attributes: &str, request: &[u8]) -> CertificateServerResponse
   {
     let mut authority = clone_to_utf16(authority, true);
     let disposition = null_mut(); // out
@@ -63,6 +63,11 @@ impl CertPassage
     let certificate_chain = null_mut(); //out
     let entity_certificate = null_mut(); //out
     let disposition_message = null_mut(); //out
+    let request_id = match request_id
+    {
+      Some(request_id) => request_id as *mut u32,
+      None => null_mut(),
+    };
     unsafe
     {
       libdcerpc_sys::CertServerRequest(
@@ -78,6 +83,7 @@ impl CertPassage
         disposition_message);
       CertificateServerResponse
       {
+        request_id: request_id.as_ref().map(|x| x.to_owned()),
         disposition: disposition.as_ref().map(|x| x.to_owned()),
         certificate_chain: certificate_chain.as_ref().map(|x| Vec::from_raw_parts(x.pb, x.cb as usize, x.cb as usize)),
         entity_certificate: entity_certificate.as_ref().map(|x| Vec::from_raw_parts(x.pb, x.cb as usize, x.cb as usize)),

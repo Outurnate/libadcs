@@ -1,24 +1,35 @@
-use cryptographic_message_syntax::{SignedDataBuilder, Oid, Bytes, SignerBuilder, asn1::rfc5652::{SignerIdentifier, IssuerAndSerialNumber, CertificateSerialNumber}, CmsError};
+pub mod rfc5272;
+
+use std::convert::Infallible;
+
+use bcder::{Mode, decode::{Constructed, DecodeError}};
+use cryptographic_message_syntax::{SignedDataBuilder, Oid, Bytes, SignerBuilder, asn1::rfc5652::{SignerIdentifier, IssuerAndSerialNumber, CertificateSerialNumber, self, CertificateChoices}, CmsError, SignedData};
 use ring::digest::{digest, SHA256};
 use signature::Error;
-use x509_certificate::{rfc2986::CertificationRequest, KeyAlgorithm, KeyInfoSigner, Signature, Signer, Sign, SignatureAlgorithm, X509CertificateError, DigestAlgorithm, rfc3280::Name};
+use x509_certificate::{rfc2986::CertificationRequest, KeyAlgorithm, KeyInfoSigner, Signature, Signer, Sign, SignatureAlgorithm, X509CertificateError, DigestAlgorithm, rfc3280::Name, X509Certificate};
+use self::rfc5272::{AttributeValue, PKIData, PKIResponse};
 
-use crate::rfc5272::PKIData;
-
-pub fn wrap_in_cmc(request: CertificationRequest) -> Result<Vec<u8>, CmsError>
+pub(crate) fn wrap_in_cms(request: CertificationRequest, attributes: impl Iterator<Item = (Oid, Vec<AttributeValue>)>) -> Result<Vec<u8>, CmsError>
 {
   let subject_identifier = SignerIdentifier::IssuerAndSerialNumber(IssuerAndSerialNumber
     {
       issuer: Name::default(),
       serial_number: CertificateSerialNumber::from(0)
     });
-  let csr = PKIData::new(request).encode_der()?;
+  let csr = PKIData::new(request, attributes).encode_der()?;
 
   SignedDataBuilder::default()
     .content_inline(csr)
     .content_type(Oid(Bytes::from_static(&[43u8, 6u8, 1u8, 5u8, 5u8, 7u8, 12u8, 2u8])))
     .signer(SignerBuilder::new_with_signer_identifier(& NullKeyInfoSigner {}, subject_identifier))
     .build_der()
+}
+
+pub(crate) fn unwrap_from_cms(der: Vec<u8>) -> Result<Vec<X509Certificate>, DecodeError<Infallible>>
+{
+  let signed_data = Constructed::decode(der.as_slice(), Mode::Der, |cons| rfc5652::SignedData::decode(cons))?;
+  let response = PKIResponse::decode_der(signed_data.content_info.content.unwrap())?;
+  Ok(vec![]) // TODO
 }
 
 struct NullKeyInfoSigner;

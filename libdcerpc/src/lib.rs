@@ -1,6 +1,5 @@
-use std::ffi::{OsStr,CString,NulError};
+use std::ffi::{NulError, CString};
 use std::ptr::null_mut;
-use std::os::unix::prelude::OsStrExt;
 use std::fmt::Display;
 use hex::ToHex;
 use thiserror::Error;
@@ -56,7 +55,7 @@ struct DceString
 
 impl DceString
 {
-  fn compose_binding(protocol: Protocol, netaddr: &OsStr) -> Result<DceString, RpcError>
+  fn compose_binding(protocol: Protocol, netaddr: &str) -> Result<DceString, RpcError>
   {
     let prot_string = match protocol
     {
@@ -130,7 +129,7 @@ impl RpcBinding
     check_error(status, "rpc_ep_resolve_binding")
   }
 
-  fn set_auth_info(&mut self, spn: &OsStr) -> Result<(), RpcError>
+  fn set_auth_info(&mut self, spn: &str) -> Result<(), RpcError>
   {
     let spn = CString::new(spn.as_bytes())?.into_raw();
     let mut status = 0u32;

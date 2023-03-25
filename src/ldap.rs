@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
+use bcder::Oid;
 use itertools::Itertools;
 use ldap3::controls::RawControl;
 use ldap3::exop::{WhoAmI, WhoAmIResp};
@@ -8,6 +9,7 @@ use ldap3::{Scope, SearchEntry, LdapError, LdapConn};
 use log::{log, Level};
 use tokio::runtime::Runtime;
 use crate::NamedCertificate;
+use crate::cmc::rfc5272::AttributeValue;
 use crate::sddl::{SDDL, AUTO_ENROLL, ENROLL, SID};
 use x509_certificate::certificate::X509Certificate;
 use trust_dns_resolver::{AsyncResolver, name_server::{GenericConnection, GenericConnectionProvider}};
@@ -296,6 +298,11 @@ impl LdapCertificateTemplate
   {
     &self.cn
   }
+
+  pub(crate) fn get_attributes(&self) -> impl Iterator<Item = (Oid, Vec<AttributeValue>)>
+  {
+    vec![].into_iter() // TODO
+  }
 }
 
 pub struct LdapEnrollmentService
@@ -334,5 +341,15 @@ impl LdapEnrollmentService
   pub fn get_certificate(&self) -> &'_ NamedCertificate
   {
     &self.certificate
+  }
+
+  pub fn has_template(&self, template: &str) -> bool
+  {
+    self.templates.iter().find(|x| template == *x).is_some()
+  }
+
+  pub fn get_endpoint(&self) -> &'_ str
+  {
+    &self.host_name
   }
 }

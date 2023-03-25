@@ -3,9 +3,10 @@ mod sddl;
 mod ldap_client;
 mod http_client;
 mod cmc;
-mod rfc5272;
 
-use std::fmt::Display;
+use std::{fmt::Display, convert::Infallible};
+use bcder::decode::DecodeError;
+use cryptographic_message_syntax::CmsError;
 use http_client::HttpCertificateClient;
 use ldap::LdapManager;
 use ldap3::LdapError;
@@ -13,7 +14,7 @@ use ldap_client::LdapCertificateClient;
 use thiserror::Error;
 use tokio::runtime::Runtime;
 use url::Url;
-use x509_certificate::X509Certificate;
+use x509_certificate::{X509Certificate, rfc2986::CertificationRequest, X509CertificateError};
 
 #[derive(Debug, Clone)]
 pub struct NamedCertificate
@@ -40,7 +41,17 @@ pub enum AdcsError
   #[error("ldap connection error: {0}")]
   LdapConnectionFailed(#[from] LdapError),
   #[error("unknown endpoint scheme: {0}")]
-  UnknownEndpointScheme(String)
+  UnknownEndpointScheme(String),
+  #[error("requested template {0} not found")]
+  TemplateNotFound(String),
+  #[error("no enrollment service found for template {0}")]
+  NoEnrollmentServiceFound(String),
+  #[error("encoutered invalid x.509 certificate: {0}")]
+  BadX509Certificate(#[from] X509CertificateError),
+  #[error("cmc encoding error: {0}")]
+  CmcEncodeError(#[from] CmsError),
+  #[error("cmc decoding error: {0}")]
+  CmcDecodeError(#[from] DecodeError<Infallible>)
 }
 
 type Result<T> = std::result::Result<T, AdcsError>;
@@ -91,4 +102,16 @@ trait CertificateClientImplementation
 {
   fn chain_certificates(&self) -> Vec<&'_ NamedCertificate>;
   fn templates(&self) -> Vec<&'_ str>;
+  fn submit(&self, request: CertificationRequest, template: &str) -> Result<EnrollmentResponse>;
+}
+
+enum EnrollmentResponse
+{
+  Issued
+  {
+    entity: X509Certificate,
+    chain: Vec<X509Certificate>
+  },
+  Pending(u32),
+  Rejected(String)
 }

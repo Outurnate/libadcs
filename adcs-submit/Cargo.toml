@@ -5,13 +5,13 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
+x509-certificate.workspace = true
 bcder.workspace = true
 thiserror.workspace = true
 log.workspace = true
 url.workspace = true
 simple_logger = { version = "4.0.0", features = ["stderr"] }
 libadcs = { path = ".." }
-x509-certificate = { path = "../cryptography-rs/x509-certificate" }
 pem = "1.1.1"
 bytes = "1.4.0"
 clap = { version = "4.1.10", features = ["derive"] }

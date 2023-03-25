@@ -17,6 +17,11 @@ impl CertificateClientImplementation for HttpCertificateClient
   {
     todo!()
   }
+
+  fn submit(&self, request: x509_certificate::rfc2986::CertificationRequest, template: &str) -> crate::Result<crate::EnrollmentResponse>
+  {
+    todo!()
+  }
 }
 
 impl HttpCertificateClient
