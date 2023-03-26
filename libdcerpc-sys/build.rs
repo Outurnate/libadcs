@@ -13,7 +13,6 @@ fn main()
   let dceidl_path = install_path.join("dceidl");
 
   println!("cargo:rustc-link-lib=dcerpc");
-  println!("cargo:rustc-link-lib=msicpr");
   println!("cargo:rustc-link-search=native={}", install_path.to_string_lossy());
   println!("cargo:rerun-if-changed=src/wrapper.h");
   println!("cargo:rerun-if-changed=src/ms-icpr.idl");

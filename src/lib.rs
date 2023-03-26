@@ -1,4 +1,3 @@
-#![warn(clippy::expect_used)]
 #![warn(clippy::unwrap_used)]
 #![forbid(unsafe_code)]
 #![allow(dead_code)]
@@ -17,7 +16,6 @@ use ldap::LdapManager;
 use ldap3::LdapError;
 use ldap_client::LdapCertificateClient;
 use thiserror::Error;
-use tokio::runtime::Runtime;
 use url::Url;
 use x509_certificate::{X509Certificate, rfc2986::CertificationRequest, X509CertificateError};
 
@@ -56,7 +54,13 @@ pub enum AdcsError
   #[error("cmc encoding error: {0}")]
   CmcEncodeError(#[from] CmsError),
   #[error("cmc decoding error: {0}")]
-  CmcDecodeError(#[from] DecodeError<Infallible>)
+  CmcDecodeError(#[from] DecodeError<Infallible>),
+  #[error("could not locate global catalog server")]
+  NoGlobalCatalogServer,
+  #[error("no rootdse (is this active directory???)")]
+  NoRootDSE,
+  #[error("could not locate ourselves in global catalog")]
+  NoMyself
 }
 
 type Result<T> = std::result::Result<T, AdcsError>;
@@ -71,8 +75,7 @@ impl CertificateServicesClient
 {
   pub fn new(forest: String, endpoint: Url, tls: bool) -> Result<Self>
   {
-    let rt  = Runtime::new().unwrap();
-    let mut ldap = LdapManager::new(forest, tls, &rt);
+    let mut ldap = LdapManager::new(forest, tls)?;
     let root_certificates = ldap.get_root_certificates()?;
     let implementation = match endpoint.scheme().to_lowercase().as_str()
     {

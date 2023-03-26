@@ -8,7 +8,10 @@ use ldap3::exop::{WhoAmI, WhoAmIResp};
 use ldap3::{Scope, SearchEntry, LdapError, LdapConn};
 use log::{log, Level};
 use tokio::runtime::Runtime;
-use crate::NamedCertificate;
+use trust_dns_resolver::ConnectionProvider;
+use trust_dns_resolver::error::ResolveError;
+use trust_dns_resolver::proto::DnsHandle;
+use crate::{NamedCertificate, AdcsError};
 use crate::cmc::rfc5272::AttributeValue;
 use crate::sddl::{SDDL, AUTO_ENROLL, ENROLL, SID};
 use x509_certificate::certificate::X509Certificate;
@@ -31,7 +34,7 @@ impl RootDSE
   fn new(ldap: &mut LdapConn) -> Result<Option<Self>, LdapError>
   {
     let (rs, _res) = ldap.search("", Scope::Base, "(objectClass=*)", vec!["configurationNamingContext", "rootDomainNamingContext", "defaultNamingContext"])?.success()?;
-    if let Some(rootdse) = rs.into_iter().next().map(|result| SearchEntry::construct(result))
+    if let Some(rootdse) = rs.into_iter().next().map(SearchEntry::construct)
     {
       match
       (
@@ -64,8 +67,8 @@ fn myself(ldap: &mut LdapConn, rootdse: &RootDSE) -> Result<Option<LdapPrincipal
 {
   let (rs, _) = ldap.extended(WhoAmI)?.success()?;
   let rs = rs.parse::<WhoAmIResp>();
-  let netbios_name = rs.authzid.split(":").into_iter().nth(1);
-  let sam_account_name = netbios_name.and_then(|netbios_name| netbios_name.split("\\").nth(1));
+  let netbios_name = rs.authzid.split(':').nth(1);
+  let sam_account_name = netbios_name.and_then(|netbios_name| netbios_name.split('\\').nth(1));
 
   //event!(Level::INFO, netbios_name = netbios_name, sam_account_name = sam_account_name);
 
@@ -93,53 +96,87 @@ fn is_member_of(ldap: &mut LdapConn, rootdse: &RootDSE, group: SID, member: SID)
   }
 }
 
-fn new_connection(scheme: impl Display, fqdn: &str, port: impl Display) -> Result<LdapConn, LdapError>
+fn try_global_catalog(scheme: impl Display, fqdn: &str, port: impl Display) -> Option<LdapConn>
 {
-  let security_descriptor_flag_control = RawControl
+  fn inner(scheme: impl Display, fqdn: &str, port: impl Display) -> Result<LdapConn, LdapError>
   {
-    ctype: "1.2.840.113556.1.4.801".to_owned(),
-    crit: true,
-    val: Some(vec![7])
-  };
-  let mut ldap = LdapConn::new(&format!("{}://{}:{}", scheme, fqdn, port))?;
-  ldap.sasl_gssapi_bind(fqdn)?;
-  ldap.with_controls(vec![security_descriptor_flag_control]);
-  Ok(ldap)
+    let security_descriptor_flag_control = RawControl
+    {
+      ctype: "1.2.840.113556.1.4.801".to_owned(),
+      crit: true,
+      val: Some(vec![7])
+    };
+    let mut ldap = LdapConn::new(&format!("{}://{}:{}", scheme, fqdn, port))?;
+    ldap.sasl_gssapi_bind(fqdn)?;
+    ldap.with_controls(vec![security_descriptor_flag_control]);
+    Ok(ldap)
+  }
+
+  match inner(scheme, fqdn, &port)
+  {
+    Ok(conn) => Some(conn),
+    Err(err) => { log!(Level::Warn, "error connecting to {}:{} ({})", fqdn, port, err); None }
+  }
 }
 
-fn connect_ldap(forest: String, tls: bool, rt: &Runtime) -> Option<LdapConn>
+fn try_all_global_catalog<C: DnsHandle<Error = ResolveError>, P: ConnectionProvider<Conn = C>>(resolver: &AsyncResolver<C, P>, rt: &Runtime, scheme: impl Display, domain: &str) -> Option<LdapConn>
 {
-  let scheme = if tls { "ldaps" } else { "ldap" };
-  let (conf, opts) = trust_dns_resolver::system_conf::read_system_conf().unwrap();
-  let resolver = AsyncResolver::<GenericConnection, GenericConnectionProvider<_>>::tokio(conf, opts).unwrap();
-  
-  let result = rt.block_on(async { resolver.srv_lookup(format!("_{}._tcp.gc._msdcs.{}", scheme, forest)).await }).unwrap();
-  let mut records = result.iter()
-    .group_by(|srv| srv.priority()).into_iter()
-    .flat_map(|group| group.1.map(move |srv| (group.0, thread_rng().gen_range(1..64) * srv.weight(), srv)))
-    .sorted_by(|a, b|
-    {
-      if a.0 == b.0
-      {
-        Ord::cmp(&b.1, &a.1)
-      }
-      else
-      {
-        Ord::cmp(&b.0, &a.0)
-      }
-    });
-  loop
+  fn inner<C: DnsHandle<Error = ResolveError>, P: ConnectionProvider<Conn = C>>(resolver: &AsyncResolver<C, P>, rt: &Runtime, scheme: impl Display, domain: &str) -> Result<Option<LdapConn>, ResolveError>
   {
-    match records.next()
-    {
-      Some((_, _, record)) => match new_connection(scheme, &record.target().to_utf8(), record.port())
+    let result = rt.block_on(async { resolver.srv_lookup(format!("_{}._tcp.gc._msdcs.{}", scheme, domain)).await })?;
+    let records = result.iter()
+      .group_by(|srv| srv.priority()).into_iter()
+      .flat_map(|group| group.1.map(move |srv| (group.0, thread_rng().gen_range(1..64) * srv.weight(), srv)))
+      .sorted_by(|a, b|
+      {
+        if a.0 == b.0
         {
-          Ok(ldap) => break Some(ldap),
-          Err(err) => log!(Level::Warn, "error connecting to {}:{} ({})", record.target(), record.port(), err)
-        },
-      None => break None
+          Ord::cmp(&b.1, &a.1)
+        }
+        else
+        {
+          Ord::cmp(&b.0, &a.0)
+        }
+      });
+    for (_, _, record) in records
+    {
+      if let Some(conn) = try_global_catalog(&scheme, &record.target().to_utf8(), record.port())
+      {
+        return Ok(Some(conn))
+      }
+    }
+    Ok(None)
+  }
+
+  match inner(resolver, rt, scheme, domain)
+  {
+    Ok(conn) => conn,
+    Err(err) => { log!(Level::Warn, "error resolving {}: {}", domain, err); None }
+  }
+}
+
+fn try_all_ldap_servers(mut realm: String, tls: bool) -> Option<LdapConn>
+{
+  let rt  = Runtime::new().expect("couldn't initialize tokio runtime");
+  let scheme = if tls { "ldaps" } else { "ldap" };
+  let (conf, opts) = trust_dns_resolver::system_conf::read_system_conf().expect("couldn't read system dns config");
+  let resolver = AsyncResolver::<GenericConnection, GenericConnectionProvider<_>>::tokio(conf, opts).expect("error constructing dns resolver");
+
+  if realm.ends_with('.')
+  {
+    realm.pop();
+  }
+
+  let names: Vec<_> = realm.split('.').collect();
+  for i in 0..names.len()
+  {
+    let domain = names[i..].join(".");
+    if let Some(conn) = try_all_global_catalog(&resolver, &rt, scheme, &domain)
+    {
+      return Some(conn)
     }
   }
+  None
 }
 
 pub struct LdapManager
@@ -152,17 +189,35 @@ pub struct LdapManager
 
 impl LdapManager
 {
-  pub fn new(forest: String, tls: bool, rt: &Runtime) -> Self
+  pub fn new(forest: String, tls: bool) -> Result<Self, AdcsError>
   {
-    let mut ldap = connect_ldap(forest, tls, rt).unwrap();
-    let rootdse = RootDSE::new(&mut ldap).unwrap().unwrap();
-    let me = myself(&mut ldap, &rootdse).unwrap().unwrap();
-    Self
+    if let Some(mut ldap) = try_all_ldap_servers(forest, tls)
     {
-      ldap,
-      rootdse,
-      me,
-      group_cache: HashMap::new()
+      if let Some(rootdse) = RootDSE::new(&mut ldap)?
+      {
+        if let Some(me) = myself(&mut ldap, &rootdse)?
+        {
+          Ok(Self
+            {
+              ldap,
+              rootdse,
+              me,
+              group_cache: HashMap::new()
+            })
+        }
+        else
+        {
+          Err(AdcsError::NoMyself)
+        }
+      }
+      else
+      {
+        Err(AdcsError::NoRootDSE)
+      }
+    }
+    else
+    {
+      Err(AdcsError::NoGlobalCatalogServer)
     }
   }
 
@@ -345,7 +400,7 @@ impl LdapEnrollmentService
 
   pub fn has_template(&self, template: &str) -> bool
   {
-    self.templates.iter().find(|x| template == *x).is_some()
+    self.templates.iter().any(|x| template == x)
   }
 
   pub fn get_endpoint(&self) -> &'_ str
