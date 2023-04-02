@@ -12,25 +12,13 @@ impl Operations
 {
   pub fn new(env: Environment) -> Result<Self, Error>
   {
-    let client = CertificateServicesClient::new(env.realm, Url::parse(&env.endpoint).unwrap(), false).map_err(|err| match err
-    {
-      AdcsError::LdapConnectionFailed(err) => Error::ConnectionError(err.to_string()),
-      AdcsError::UnknownEndpointScheme(err) => Error::ConnectionError(err),
-      AdcsError::TemplateNotFound(_) => todo!(),
-      AdcsError::NoEnrollmentServiceFound(_) => todo!(),
-      AdcsError::BadX509Certificate(_) => todo!(),
-      AdcsError::CmcEncodeError(_) => todo!(),
-      AdcsError::CmcDecodeError(_) => todo!(),
-      AdcsError::NoGlobalCatalogServer => todo!(),
-      AdcsError::NoRootDSE => todo!(),
-      AdcsError::NoMyself => todo!(),
-    })?;
+    let client = CertificateServicesClient::new(env.realm, Url::parse(&env.endpoint).unwrap(), false)?;
     Ok(Self { client })
   }
 
   pub fn submit(self, csr: CertificationRequest, ca_profile: String) -> Result<EnrollmentResponse, Error>
   {
-    todo!()
+    Ok(self.client.submit(csr, &ca_profile)?)
   }
 
   pub fn poll(self, ca_cookie: String) -> Result<EnrollmentResponse, Error>

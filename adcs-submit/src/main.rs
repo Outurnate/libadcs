@@ -1,9 +1,9 @@
 mod operations;
 
-use std::{env::{self, VarError}, process::exit, fmt::Display};
+use std::{env, process::exit, fmt::Display, ffi::OsStr};
 use bcder::{Mode, decode::{Constructed, DecodeError, BytesSource, Source}};
 use bytes::Bytes;
-use libadcs::NamedCertificate;
+use libadcs::{NamedCertificate, AdcsError, EnrollmentResponse};
 use operations::Operations;
 use pem::PemError;
 use thiserror::Error;
@@ -35,12 +35,26 @@ pub enum Error
   ConnectionError(String),         // 3
   #[error("underconfigured: {0}")]
   Underconfigurated(String),       // 4
-  #[error("bad environment variable: {0}")]
-  BadEnvironment(#[from] VarError),
+  #[error("bad environment variable: {0} {1}")]
+  BadEnvironment(String, String),
   #[error("bad pem encoding: {0}")]
   BadPemEncoding(#[from] PemError),
   #[error("bad pem contents: {0}")]
-  BadPemData(#[from] DecodeError<<BytesSource as Source>::Error>)
+  BadPemData(#[from] DecodeError<<BytesSource as Source>::Error>),
+  #[error("{0}")]
+  MiscError(String)
+}
+
+impl From<AdcsError> for Error
+{
+  fn from(value: AdcsError) -> Self
+  {
+    match value
+    {
+      AdcsError::LdapConnectionFailed(ldap) => Self::ConnectionError(ldap.to_string()),
+      _ => Self::MiscError(value.to_string())
+    }
+  }
 }
 
 impl CertmongerOutput for Error
@@ -56,24 +70,15 @@ impl CertmongerOutput for Error
   }
 }
 
-pub enum EnrollmentResponse
-{
-  Issued(CapturedX509Certificate), // 0
-  WaitABit(String),                // 1
-  Rejected(String),                // 2
-  WaitABitMore(u64, String)        // 5
-}
-
 impl CertmongerOutput for EnrollmentResponse
 {
   fn output(self) -> (i32, String)
   {
     match self
     {
-      EnrollmentResponse::Issued(certificate) => (0, certificate.encode_pem()),
-      EnrollmentResponse::WaitABit(message) => (1, message),
-      EnrollmentResponse::Rejected(message) => (2, message),
-      EnrollmentResponse::WaitABitMore(seconds, message) => (5, format!("{}\n{}", seconds, message)),
+      EnrollmentResponse::Issued { entity, .. } => (0, entity.encode_pem().unwrap()),
+      EnrollmentResponse::Pending(ca_cookie) => (5, format!("{}\n{}", 60, ca_cookie)),
+      EnrollmentResponse::Rejected(message) => (2, message)
     }
   }
 }
@@ -107,21 +112,26 @@ impl Display for RootCertificates
   }
 }
 
+fn var(name: impl AsRef<OsStr>) -> Result<String, Error>
+{
+  env::var(&name).map_err(|err| Error::BadEnvironment(name.as_ref().to_string_lossy().to_string(), err.to_string()))
+}
+
 fn certmonger_submit(env: Environment) -> Result<(i32, String), Error>
 {
   let operations = Operations::new(env)?;
-  match env::var("CERTMONGER_OPERATION")?.as_str()
+  match var("CERTMONGER_OPERATION")?.as_str()
   {
     "SUBMIT" =>
     {
-      let csr = Constructed::decode(Bytes::copy_from_slice(&pem::parse(env::var("CERTMONGER_CSR")?)?.contents), Mode::Der, |der| CertificationRequest::take_from(der))?;
-      let ca_profile = env::var("CERTMONGER_CA_PROFILE")?;
+      let csr = Constructed::decode(Bytes::copy_from_slice(&pem::parse(var("CERTMONGER_CSR")?)?.contents), Mode::Der, |der| CertificationRequest::take_from(der))?;
+      let ca_profile = var("CERTMONGER_CA_PROFILE")?;
 
       Ok(operations.submit(csr, ca_profile)?.output())
     },
     "POLL" =>
     {
-      let ca_cookie = env::var("CERTMONGER_CA_COOKIE")?;
+      let ca_cookie = var("CERTMONGER_CA_COOKIE")?;
 
       Ok(operations.poll(ca_cookie)?.output())
     },

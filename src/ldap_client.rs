@@ -1,5 +1,6 @@
 use libdcerpc::{ms_icpr::{CertPassage, DWFlags, CertificateServerResponse}, Protocol};
 use x509_certificate::{rfc2986::CertificationRequest, X509Certificate};
+use log::{log, Level};
 
 use crate::{CertificateClientImplementation, ldap::{LdapManager, LdapEnrollmentService, LdapCertificateTemplate}, NamedCertificate, AdcsError, EnrollmentResponse, cmc::{wrap_in_cms, unwrap_from_cms}};
 
@@ -13,7 +14,10 @@ impl CertificateClientImplementation for LdapCertificateClient
 {
   fn chain_certificates(&self) -> Vec<&'_ NamedCertificate>
   {
-    self.enrollment_services.iter().map(|service| service.get_certificate()).collect()
+    self.enrollment_services
+      .iter()
+      .map(|service| service.get_certificate())
+      .collect()
   }
 
   fn templates(&self) -> Vec<&'_ str>
@@ -25,9 +29,12 @@ impl CertificateClientImplementation for LdapCertificateClient
   {
     if let Some(template) = self.templates.iter().find(|x| x.get_name() == template_name)
     {
-      if let Some(enrollment_service) = self.enrollment_services.iter().find(|x| x.has_template(template_name))
+      if let Some(enrollment_service) = self.enrollment_services.iter().skip(1).find(|x| x.has_template(template_name))
       {
-        let mut client = CertPassage::new(Protocol::Tcp, enrollment_service.get_endpoint(), &format!("host/{}", enrollment_service.get_endpoint())).unwrap();
+        let endpoint = enrollment_service.get_endpoint();
+        let spn = format!("host/{}", enrollment_service.get_endpoint());
+        log!(Level::Trace, "trying to connect to rpc endpoint {} with spn {}", endpoint, spn);
+        let mut client = CertPassage::new(Protocol::Tcp, endpoint, &spn).unwrap();
         match client.cert_server_request(DWFlags::REQUEST_TYPE_CMC | DWFlags::CMC_FULL_PKI_RESPONSE, &enrollment_service.get_certificate().nickname, None, "", &wrap_in_cms(request, template.get_attributes())?)
         {
           CertificateServerResponse

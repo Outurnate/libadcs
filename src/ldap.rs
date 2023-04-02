@@ -54,7 +54,7 @@ impl RootDSE
           default_naming_context: default_naming_context.to_string(),
           certificate_templates: format!("CN=Certificate Templates,CN=Public Key Services,CN=Services,{}", configuration_naming_context),
           certification_authorities: format!("CN=Certification Authorities,CN=Public Key Services,CN=Services,{}", configuration_naming_context),
-          enrollment_services: String::new()
+          enrollment_services: format!("CN=Enrollment Services,CN=Public Key Services,CN=Services,{}", configuration_naming_context)
         })),
         (_, _, _) => Ok(None)
       }
@@ -104,18 +104,30 @@ fn try_global_catalog(scheme: impl Display, fqdn: &str, port: impl Display) -> O
     {
       ctype: "1.2.840.113556.1.4.801".to_owned(),
       crit: true,
-      val: Some(vec![7])
+      val: Some(vec![0x30, 0x03, 0x02, 0x01, 0x07])
     };
     let mut ldap = LdapConn::new(&format!("{}://{}:{}", scheme, fqdn, port))?;
     ldap.sasl_gssapi_bind(fqdn)?;
     ldap.with_controls(vec![security_descriptor_flag_control]);
+    log!(Level::Info, "selected {} on port {}", fqdn, port);
     Ok(ldap)
   }
 
-  match inner(scheme, fqdn, &port)
+  let result = if fqdn.ends_with('.')
+  {
+    let mut temp = fqdn.to_owned();
+    temp.pop();
+    inner(scheme, &temp, &port)
+  }
+  else
+  {
+    inner(scheme, fqdn, &port)
+  };
+
+  match result
   {
     Ok(conn) => Some(conn),
-    Err(err) => { log!(Level::Warn, "error connecting to {}:{} ({})", fqdn, port, err); None }
+    Err(err) => { log!(Level::Warn, "error connecting to {} on port {} ({})", fqdn, port, err); None }
   }
 }
 
@@ -189,14 +201,17 @@ pub struct LdapManager
 
 impl LdapManager
 {
-  pub fn new(forest: String, tls: bool) -> Result<Self, AdcsError>
+  pub fn new(realm: String, tls: bool) -> Result<Self, AdcsError>
   {
-    if let Some(mut ldap) = try_all_ldap_servers(forest, tls)
+    if let Some(mut ldap) = try_all_ldap_servers(realm.clone(), tls)
     {
+      log!(Level::Info, "found ldap global catalog for realm {} (using tls: {})", realm, tls);
       if let Some(rootdse) = RootDSE::new(&mut ldap)?
       {
+        log!(Level::Info, "found rootdse");
         if let Some(me) = myself(&mut ldap, &rootdse)?
         {
+          log!(Level::Info, "found myself in ldap");
           Ok(Self
             {
               ldap,
@@ -242,7 +257,11 @@ impl LdapManager
         }))
       )
       {
-        (Some(cn), Some(certificate)) => Some(NamedCertificate { nickname: cn.to_owned(), certificate }),
+        (Some(cn), Some(certificate)) =>
+        {
+          log!(Level::Info, "found root cert {}", cn);
+          Some(NamedCertificate { nickname: cn.to_owned(), certificate })
+        },
         _ => None
       }
     }).collect::<Vec<_>>())
@@ -250,7 +269,7 @@ impl LdapManager
 
   pub fn get_enrollment_service(&mut self) -> Result<Vec<LdapEnrollmentService>, LdapError>
   {
-    LdapEnrollmentService::from_query(&mut self.ldap, &self.rootdse, Scope::OneLevel, "TODO FILTER TYPE")
+    LdapEnrollmentService::from_query(&mut self.ldap, &self.rootdse, Scope::OneLevel, "(objectClass=pKIEnrollmentService)")
   }
 }
 
@@ -387,7 +406,11 @@ impl LdapEnrollmentService
         rs.attrs.get("certificateTemplates").map(|v| v.to_vec())
       )
       {
-        (Some(cn), Some(host_name), Some(certificate), Some(templates)) => Some(Self { host_name, certificate: NamedCertificate { nickname: cn, certificate }, templates }),
+        (Some(cn), Some(host_name), Some(certificate), Some(templates)) =>
+        {
+          log!(Level::Info, "found enrollment service {}", cn);
+          Some(Self { host_name, certificate: NamedCertificate { nickname: cn, certificate }, templates })
+        },
         _ => None
       }
     }).collect::<Vec<Self>>())

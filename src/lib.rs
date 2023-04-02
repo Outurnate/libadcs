@@ -19,7 +19,7 @@ use thiserror::Error;
 use url::Url;
 use x509_certificate::{X509Certificate, rfc2986::CertificationRequest, X509CertificateError};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NamedCertificate
 {
   nickname: String,
@@ -97,12 +97,21 @@ impl CertificateServicesClient
 
   pub fn chain_certificates(&self) -> Vec<&'_ NamedCertificate>
   {
-    self.implementation.chain_certificates()
+    self.implementation
+      .chain_certificates()
+      .into_iter()
+      .filter(|named_certificate| !self.root_certificates.contains(named_certificate))
+      .collect()
   }
 
   pub fn template_names(&self) -> Vec<&'_ str>
   {
     self.implementation.templates()
+  }
+
+  pub fn submit(&self, request: CertificationRequest, template: &str) -> Result<EnrollmentResponse>
+  {
+    self.implementation.submit(request, template)
   }
 }
 
@@ -113,7 +122,7 @@ trait CertificateClientImplementation
   fn submit(&self, request: CertificationRequest, template: &str) -> Result<EnrollmentResponse>;
 }
 
-enum EnrollmentResponse
+pub enum EnrollmentResponse
 {
   Issued
   {
