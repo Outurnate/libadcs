@@ -6,7 +6,33 @@ use super::wsse::BinarySecurityTokenType;
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512/")]
-pub struct RequestSecurityTokenType
+pub struct RequestSecurityToken
+{
+  #[yaserde(rename = "RequestSecurityToken", prefix = "wst")]
+  request: RequestSecurityTokenType
+}
+
+impl RequestSecurityToken
+{
+  pub fn new(message: CmcMessage, request_id: impl Into<Option<String>>) -> Self
+  {
+    Self
+    {
+      request: RequestSecurityTokenType
+      {
+        token_type: "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3".to_owned(),
+        request_type: "http://docs.oasis-open.org/ws-sx/ws-trust/200512/Issue".to_owned(),
+        binary_security_token: message.into(),
+        request_id: request_id.into(),
+        context: None
+      }
+    }
+  }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
+#[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512/")]
+struct RequestSecurityTokenType
 {
   #[yaserde(rename = "TokenType", prefix = "wst")]
   token_type: String,
@@ -14,29 +40,14 @@ pub struct RequestSecurityTokenType
   #[yaserde(rename = "RequestType", prefix = "wst")]
   request_type: String,
 
-  #[yaserde(rename = "BinarySecurityToken", prefix = "wst")]
+  #[yaserde(rename = "BinarySecurityToken", prefix = "wsse")]
   binary_security_token: BinarySecurityTokenType,
 
   #[yaserde(rename = "RequestID", prefix = "wst")]
-  request_id: String,
+  request_id: Option<String>,
 
   #[yaserde(attribute, rename = "Context")]
   context: Option<String>
-}
-
-impl RequestSecurityTokenType
-{
-  pub fn new(message: CmcMessage, request_id: String) -> Self
-  {
-    Self
-    {
-      token_type: "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3".to_owned(),
-      request_type: "http://docs.oasis-open.org/ws-sx/ws-trust/200512/Issue".to_owned(),
-      binary_security_token: message.into(),
-      request_id,
-      context: None
-    }
-  }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]

@@ -7,10 +7,14 @@ use crate::cmc::CmcMessage;
 #[yaserde(prefix = "wsse", namespace = "wsse: http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd")]
 pub struct BinarySecurityTokenType
 {
-  content: EncodedString,
-    
+  #[yaserde(text)]
+  content: String,
+
   #[yaserde(attribute, rename = "ValueType")]
-  value_type: Option<String>
+  value_type: Option<String>,
+
+  #[yaserde(attribute, rename = "EncodingType")]
+  encoding_type: Option<String>
 }
 
 impl From<CmcMessage> for BinarySecurityTokenType
@@ -19,29 +23,8 @@ impl From<CmcMessage> for BinarySecurityTokenType
   {
     Self
     {
-      content: value.0.into(),
-      value_type: Some("http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#PKCS7".to_owned())
-    }
-  }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
-#[yaserde(prefix = "wsse", namespace = "wsse: http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd")]
-struct EncodedString
-{
-  content: String,
-
-  #[yaserde(attribute, rename = "EncodingType")]
-  encoding_type: Option<String>
-}
-
-impl<T: AsRef<[u8]>> From<T> for EncodedString
-{
-  fn from(value: T) -> Self
-  {
-    Self
-    {
-      content: general_purpose::STANDARD.encode(value),
+      content: general_purpose::STANDARD.encode(value.0),
+      value_type: Some("http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#PKCS7".to_owned()),
       encoding_type: Some("http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary".to_owned())
     }
   }
