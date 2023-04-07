@@ -10,7 +10,7 @@ macro_rules! AnyType
   ($name:ident) =>
   {
     #[derive(Clone)]
-    pub(crate) struct $name(Captured);
+    pub struct $name(Captured);
 
     impl $name
     {

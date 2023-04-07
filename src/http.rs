@@ -4,8 +4,6 @@ use reqwest::{blocking::{Client, Body}, IntoUrl, StatusCode, header};
 use base64::{Engine as _, engine::general_purpose};
 use thiserror::Error;
 
-use crate::schemas::EnvelopeType;
-
 #[derive(Error, Debug)]
 pub enum Error
 {
@@ -33,7 +31,7 @@ impl SoapClient
     Self { http_client: Client::new() }
   }
 
-  fn invoke(&self, envelope: &EnvelopeType) -> Result<(), Error>
+  /*fn invoke(&self, envelope: &EnvelopeType) -> Result<(), Error>
   {
     let spn = ""; // TODO
     let mut request = SoapClientRequest::new(&self.http_client, spn)?;
@@ -42,7 +40,7 @@ impl SoapClient
       request.step(envelope.header.action.as_ref().unwrap(), yaserde::ser::to_string(envelope).unwrap())?;
     }
     Ok(())
-  }
+  }*/
 }
 
 struct SoapClientRequest<'a>
