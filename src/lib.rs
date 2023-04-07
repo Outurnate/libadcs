@@ -7,6 +7,8 @@ mod sddl;
 mod ldap_client;
 mod http_client;
 mod cmc;
+mod http;
+mod schemas;
 
 use std::{fmt::Display, convert::Infallible};
 use bcder::decode::DecodeError;
