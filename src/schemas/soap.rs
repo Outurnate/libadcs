@@ -95,7 +95,7 @@ struct Detail
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize, Builder)]
-#[yaserde(prefix = "soap", namespace = "soap: http://www.w3.org/2003/05/soap-envelope")]
+#[yaserde(prefix = "soap", namespace = "soap: http://www.w3.org/2003/05/soap-envelope", namespace = "wsa: http://www.w3.org/2005/08/addressing")]
 #[builder(setter(into), default)]
 pub struct Header
 {

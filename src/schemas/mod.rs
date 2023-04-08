@@ -1,8 +1,8 @@
 use std::io::Read;
 use xml::{reader, writer};
 use thiserror::Error;
-use xmltree::{Element, ParseError, XMLNode};
-use yaserde::{de, ser};
+use xmltree::{Element, ParseError};
+use yaserde::{de, ser::{self, Serializer}};
 use self::soap::{Header, Fault};
 
 mod soap;
@@ -23,9 +23,6 @@ pub enum Error
   #[error("xml writer error: {0}")]
   Write(#[from] writer::Error),
 
-  #[error("soap envelope has no header")]
-  NoHeader,
-
   #[error("soap envelope has no body")]
   NoBody,
 
@@ -39,54 +36,55 @@ pub enum Error
   Fault(Box<Fault>)
 }
 
-fn deserialize_from_element<T: yaserde::YaDeserialize>(element: &Element, local_name: impl AsRef<str>, namespace: impl AsRef<str>, error_mapper: impl FnOnce(String) -> Error) -> Result<Option<T>, Error>
+trait ElementExt
 {
-  element.get_child((local_name.as_ref(), namespace.as_ref())).map(|element|
+  fn deserialize<T: yaserde::YaDeserialize>(&self, error_mapper: impl FnOnce(String) -> Error) -> Result<T, Error>;
+}
+
+impl ElementExt for Element
+{
+  fn deserialize<T: yaserde::YaDeserialize>(&self, error_mapper: impl FnOnce(String) -> Error) -> Result<T, Error>
   {
     let mut buffer = Vec::new();
-    element.write(&mut buffer)?;
+    self.write(&mut buffer)?;
     de::from_reader(buffer.as_slice()).map_err(error_mapper)
-  }).transpose()
+  }
+}
+
+pub fn to_string_with_config_and_start<T: yaserde::YaSerialize>(model: &T, config: &ser::Config, start_event_name: String) -> Result<String, String>
+{
+  let mut buf = Vec::new();
+  let mut serializer = Serializer::new_from_writer(&mut buf, config);
+  serializer.set_start_event_name(Some(start_event_name));
+  yaserde::YaSerialize::serialize(model, &mut serializer)?;
+  let data = std::str::from_utf8(buf.as_slice()).expect("Found invalid UTF-8");
+  Ok(data.into())
 }
 
 pub trait SoapBody: yaserde::YaSerialize + yaserde::YaDeserialize + Default
 {
-  fn from_soap<R: Read>(reader: R) -> Result<(Header, Self), Error>;
+  fn from_soap<R: Read>(reader: R) -> Result<(Option<Header>, Self), Error>;
   fn clone_to_soap(&self, header: &Header) -> Result<String, Error>;
 }
 
 impl<T: yaserde::YaSerialize + yaserde::YaDeserialize + Default> SoapBody for T
 {
-  fn from_soap<R: Read>(reader: R) -> Result<(Header, Self), Error>
+  fn from_soap<R: Read>(reader: R) -> Result<(Option<Header>, Self), Error>
   {
     let tree = Element::parse(reader)?;
-    let header = deserialize_from_element(&tree, "Header", "http://www.w3.org/2003/05/soap-envelope", Error::InvalidHeader)
-      .map(|v| match v
-      {
-        Some(v) => Ok(v),
-        None => Err(Error::NoHeader),
-      })??;
+    let header = tree
+      .get_child(("Header", "http://www.w3.org/2003/05/soap-envelope"))
+      .map(|header| header.deserialize(Error::InvalidHeader))
+      .transpose()?;
     if let Some(body) = tree.get_child(("Body", "http://www.w3.org/2003/05/soap-envelope"))
     {
-      if let Some(fault) = deserialize_from_element(&tree, "Fault", "http://www.w3.org/2003/05/soap-envelope", Error::InvalidBody)?
+      if let Some(fault) = body.get_child(("Fault", "http://www.w3.org/2003/05/soap-envelope"))
       {
-        Err(Error::Fault(Box::new(fault)))
+        Err(Error::Fault(Box::new(fault.deserialize(Error::InvalidBody)?)))
       }
       else
       {
-        let mut body_contents = Vec::new();
-        for child in &body.children
-        {
-          if let XMLNode::Element(child) = child
-          {
-            child.write(&mut body_contents)?;
-          }
-        }
-        match de::from_reader(body_contents.as_slice())
-        {
-          Ok(body) => Ok((header, body)),
-          Err(msg) => Err(Error::InvalidBody(msg))
-        }
+        Ok((header, body.deserialize(Error::InvalidBody)?))
       }
     }
     else
@@ -97,13 +95,10 @@ impl<T: yaserde::YaSerialize + yaserde::YaDeserialize + Default> SoapBody for T
 
   fn clone_to_soap(&self, header: &Header) -> Result<String, Error>
   {
-    let pre = "<?xml version=\"1.0\" encoding=\"utf-8\"?><soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\"><soap:Header>";
-    let sep = "</soap:Header><soap:Body xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">";
-    let post = "</soap:Body></soap:Envelope>";
     let config = ser::Config { perform_indent: false, write_document_declaration: false, indent_string: None };
     let header = ser::to_string_with_config(header, &config).map_err(Error::InvalidHeader)?;
-    let body = ser::to_string_with_config(self, &config).map_err(Error::InvalidBody)?;
-    Ok(pre.to_owned() + &header + sep + &body + post)
+    let body = to_string_with_config_and_start(self, &config, "soap:Body".to_owned()).map_err(Error::InvalidBody)?;
+    Ok(format!("<?xml version=\"1.0\" encoding=\"utf-8\"?><soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">{}{}</soap:Envelope>", header, body))
   }
 }
 
@@ -112,9 +107,24 @@ impl<T: yaserde::YaSerialize + yaserde::YaDeserialize + Default> SoapBody for T
 mod tests
 {
   use uuid::Uuid;
-  use crate::{schemas::soap::HeaderBuilder, cmc::CmcMessage};
+  use crate::cmc::CmcMessage;
+  use super::{soap::HeaderBuilder};
   use super::{soap::EndpointReferenceBuilder, wstrust::RequestSecurityToken};
-  use super::SoapBody;
+  use super::{SoapBody, Error};
+
+  #[test]
+  fn fault()
+  {
+    let fault = include_str!("tests/fault.xml");
+    if let Err(Error::Fault(fault)) = RequestSecurityToken::from_soap(fault.as_bytes())
+    {
+      assert_eq!(fault.to_string(), "fault env:Sender: Message does not have necessary info (node=None, role=Some(\"http://gizmos.com/order\"), detail=Some(Detail))".to_owned());
+    }
+    else
+    {
+      panic!();
+    }
+  }
 
   #[test]
   fn round_trip()
@@ -126,13 +136,19 @@ mod tests
       .action("http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RST/wstep".to_owned())
       .message_id(format!("urn:uuid:{}", Uuid::new_v4()))
       .build().expect("error building header");
-    let body = RequestSecurityToken::new(CmcMessage(vec![0]), None);
+    let body = RequestSecurityToken::new(CmcMessage(vec![0]), Some("7777".to_owned()));
     let envelope = body.clone_to_soap(&header).expect("failed to create soap envelope");
-    println!("{}", envelope);
 
     let (new_header, new_body) = RequestSecurityToken::from_soap(envelope.as_bytes()).expect("failed to reparse soap envelope");
 
-    assert_eq!(header, new_header);
+    assert_eq!(header, new_header.expect("header lost in round trip"));
     assert_eq!(body, new_body);
+  }
+
+  #[test]
+  fn parse_known()
+  {
+    let known = include_str!("tests/wstep.xml");
+    RequestSecurityToken::from_soap(known.as_bytes()).expect("failed to parse known good soap message");
   }
 }

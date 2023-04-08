@@ -5,7 +5,7 @@ use crate::cmc::CmcMessage;
 use super::wsse::BinarySecurityTokenType;
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
-#[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512/")]
+#[yaserde(prefix = "soap", namespace = "soap: http://www.w3.org/2003/05/soap-envelope")]
 pub struct RequestSecurityToken
 {
   #[yaserde(rename = "RequestSecurityToken", prefix = "wst")]
@@ -31,7 +31,7 @@ impl RequestSecurityToken
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
-#[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512/")]
+#[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512", namespace = "wstep: http://schemas.microsoft.com/windows/pki/2009/01/enrollment")]
 struct RequestSecurityTokenType
 {
   #[yaserde(rename = "TokenType", prefix = "wst")]
@@ -43,7 +43,7 @@ struct RequestSecurityTokenType
   #[yaserde(rename = "BinarySecurityToken", prefix = "wsse")]
   binary_security_token: BinarySecurityTokenType,
 
-  #[yaserde(rename = "RequestID", prefix = "wst")]
+  #[yaserde(rename = "RequestID", prefix = "wstep")]
   request_id: Option<String>,
 
   #[yaserde(attribute, rename = "Context")]
@@ -51,7 +51,7 @@ struct RequestSecurityTokenType
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
-#[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512/")]
+#[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512")]
 struct RequestSecurityTokenResponseType
 {
   #[yaserde(rename = "TokenType", prefix = "wst")]
@@ -74,13 +74,13 @@ struct RequestSecurityTokenResponseType
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
-#[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512/")]
+#[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512")]
 struct RequestedSecurityTokenType
 {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
-#[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512/")]
+#[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512")]
 pub struct RequestSecurityTokenResponseCollectionType
 {
   #[yaserde(rename = "RequestSecurityTokenResponse", prefix = "wst")]
