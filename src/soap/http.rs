@@ -37,11 +37,16 @@ impl SoapClient
   {
     let spn = ""; // TODO
     let mut request = SoapClientRequest::new(&self.http_client, spn)?;
-    loop
+    let body = body.clone_to_soap(header).unwrap();
+    let response = loop
     {
-      request.step(envelope.header.action.as_ref().unwrap(), yaserde::ser::to_string(envelope).unwrap())?;
-    }
-    Ok(())
+      match request.step(header.get_action().unwrap(), body.clone())?
+      {
+        Some(bytes) => break bytes,
+        None => continue
+      }
+    };
+    Ok(R::from_soap(&*response).unwrap().1)
   }
 }
 

@@ -142,6 +142,14 @@ pub struct Header
   problem_action: Option<ProblemActionType>
 }
 
+impl Header
+{
+  pub fn get_action(&self) -> Option<&'_ str>
+  {
+    self.action.as_deref()
+  }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize, Builder)]
 #[yaserde(prefix = "wsa", namespace = "wsa: http://www.w3.org/2005/08/addressing")]
 #[builder(setter(into), default)]

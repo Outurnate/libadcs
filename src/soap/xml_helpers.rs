@@ -3,7 +3,7 @@ use yaserde::{de, ser::{self, Serializer}};
 
 use super::Error;
 
-trait ElementExt
+pub trait ElementExt
 {
   fn deserialize<T: yaserde::YaDeserialize>(&self, error_mapper: impl FnOnce(String) -> Error) -> Result<T, Error>;
 }
@@ -18,7 +18,7 @@ impl ElementExt for Element
   }
 }
 
-fn to_string_with_config_and_start<T: yaserde::YaSerialize>(model: &T, config: &ser::Config, start_event_name: String) -> Result<String, String>
+pub fn to_string_with_config_and_start<T: yaserde::YaSerialize>(model: &T, config: &ser::Config, start_event_name: String) -> Result<String, String>
 {
   let mut buf = Vec::new();
   let mut serializer = Serializer::new_from_writer(&mut buf, config);

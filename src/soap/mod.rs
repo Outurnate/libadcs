@@ -4,6 +4,7 @@ use thiserror::Error;
 use xmltree::{Element, ParseError};
 use yaserde::ser;
 use self::schema::{Fault, Header};
+use self::xml_helpers::{ElementExt, to_string_with_config_and_start};
 
 pub mod schema;
 mod http;
@@ -74,7 +75,7 @@ impl<T: yaserde::YaSerialize + yaserde::YaDeserialize + Default> SoapBody for T
   {
     let config = ser::Config { perform_indent: false, write_document_declaration: false, indent_string: None };
     let header = ser::to_string_with_config(header, &config).map_err(Error::InvalidHeader)?;
-    let body = self.to_string_with_config_and_start(&config, "soap:Body".to_owned()).map_err(Error::InvalidBody)?;
+    let body = to_string_with_config_and_start(self, &config, "soap:Body".to_owned()).map_err(Error::InvalidBody)?;
     Ok(format!("<?xml version=\"1.0\" encoding=\"utf-8\"?><soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">{}{}</soap:Envelope>", header, body))
   }
 }
