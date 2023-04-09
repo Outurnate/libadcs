@@ -1,6 +1,6 @@
+use cryptographic_message_syntax::CmsError;
 use yaserde_derive::{YaDeserialize, YaSerialize};
-
-use crate::cmc::CmcMessage;
+use crate::cmc::CmcRequest;
 
 use super::wsse::BinarySecurityTokenType;
 
@@ -14,19 +14,20 @@ pub struct RequestSecurityToken
 
 impl RequestSecurityToken
 {
-  pub fn new(message: CmcMessage, request_id: impl Into<Option<String>>) -> Self
+  pub fn new(request: CmcRequest, request_id: impl Into<Option<String>>) -> Result<Self, CmsError>
   {
-    Self
+    let request: Vec<u8> = request.try_into()?;
+    Ok(Self
     {
       request: RequestSecurityTokenType
       {
         token_type: "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3".to_owned(),
         request_type: "http://docs.oasis-open.org/ws-sx/ws-trust/200512/Issue".to_owned(),
-        binary_security_token: message.into(),
+        binary_security_token: BinarySecurityTokenType::from(request),
         request_id: request_id.into(),
         context: None
       }
-    }
+    })
   }
 }
 

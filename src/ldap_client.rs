@@ -2,7 +2,7 @@ use libdcerpc::{ms_icpr::{CertPassage, DWFlags, CertificateServerResponse}, Prot
 use x509_certificate::{rfc2986::CertificationRequest, X509Certificate};
 use log::{log, Level};
 
-use crate::{CertificateClientImplementation, ldap::{LdapManager, LdapEnrollmentService, LdapCertificateTemplate}, NamedCertificate, AdcsError, EnrollmentResponse, cmc::CmcMessage};
+use crate::{CertificateClientImplementation, ldap::{LdapManager, LdapEnrollmentService, LdapCertificateTemplate}, NamedCertificate, AdcsError, EnrollmentResponse, cmc::{CmcRequest, CmcResponse}};
 
 pub struct LdapCertificateClient
 {
@@ -35,7 +35,8 @@ impl CertificateClientImplementation for LdapCertificateClient
         let spn = format!("host/{}", enrollment_service.get_endpoint());
         log!(Level::Trace, "trying to connect to rpc endpoint {} with spn {}", endpoint, spn);
         let mut client = CertPassage::new(Protocol::Tcp, endpoint, &spn).unwrap();
-        match client.cert_server_request(DWFlags::REQUEST_TYPE_CMC | DWFlags::CMC_FULL_PKI_RESPONSE, &enrollment_service.get_certificate().nickname, None, "", &CmcMessage::new(request, template.get_attributes())?.0)
+        let request: Vec<u8> = CmcRequest::new(request, template.get_attributes()).try_into()?;
+        match client.cert_server_request(DWFlags::REQUEST_TYPE_CMC | DWFlags::CMC_FULL_PKI_RESPONSE, &enrollment_service.get_certificate().nickname, None, "", request.as_slice())
         {
           CertificateServerResponse
           {
@@ -43,7 +44,7 @@ impl CertificateClientImplementation for LdapCertificateClient
             certificate_chain,
             entity_certificate: Some(entity_certificate),
             disposition_message, ..
-          } => Ok(EnrollmentResponse::Issued { entity: X509Certificate::from_der(entity_certificate)?, chain: certificate_chain.map(|x| CmcMessage(x).decode()).unwrap()? }),
+          } => Ok(EnrollmentResponse::Issued { entity: X509Certificate::from_der(entity_certificate)?, chain: vec![] }),
           CertificateServerResponse
           {
             disposition: Some(0x0000_0005), // taken under submission

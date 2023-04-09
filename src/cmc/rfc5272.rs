@@ -14,14 +14,19 @@ macro_rules! AnyType
 
     impl $name
     {
-      pub(crate) fn take_from<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
+      pub fn from_constructed<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
       {
         cons.take_constructed(|_, cons| Ok(Self(cons.capture_all()?)))
       }
 
-      pub(crate) fn take_opt_from<S: Source>(cons: &mut Constructed<S>) -> Result<Option<Self>, DecodeError<S::Error>>
+      pub fn opt_from_constructed<S: Source>(cons: &mut Constructed<S>) -> Result<Option<Self>, DecodeError<S::Error>>
       {
         cons.take_opt_constructed(|_, cons| Ok(Self(cons.capture_all()?)))
+      }
+
+      pub fn take_from<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
+      {
+        Ok(Self(cons.capture_all()?))
       }
     }
 
@@ -74,12 +79,12 @@ macro_rules! DeriveValues
   {
     impl $name
     {
-      pub(crate) fn encode_ref(&self) -> impl encode::Values + '_
+      pub fn encode_ref(&self) -> impl encode::Values + '_
       {
         self.encode_ref_as(self.default_tag())
       }
 
-      pub(crate) fn encode_der(&self) -> Result<Vec<u8>, std::io::Error>
+      pub fn encode_der(&self) -> Result<Vec<u8>, std::io::Error>
       {
         let mut buffer = vec![];
         encode::Values::write_encoded(&self.encode_ref(), Mode::Der, &mut buffer)?;
@@ -87,19 +92,19 @@ macro_rules! DeriveValues
         Ok(buffer)
       }
 
-      pub(crate) fn take_opt_from<S: Source>(cons: &mut Constructed<S>) -> Result<Option<Self>, DecodeError<S::Error>>
+      pub fn opt_from_sequence<S: Source>(cons: &mut Constructed<S>) -> Result<Option<Self>, DecodeError<S::Error>>
       {
-        cons.take_opt_sequence(|cons| Self::take(cons))
+        cons.take_opt_sequence(|cons| Self::take_from(cons))
       }
     
-      pub(crate) fn take_from<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
+      pub fn from_sequence<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
       {
-        cons.take_sequence(|cons| Self::take(cons))
+        cons.take_sequence(|cons| Self::take_from(cons))
       }
 
-      pub(crate) fn decode_der<S: Source, I: IntoSource<Source = S>>(source: I) -> Result<Self, DecodeError<S::Error>>
+      pub fn decode_der<S: Source, I: IntoSource<Source = S>>(source: I) -> Result<Self, DecodeError<S::Error>>
       {
-        Constructed::decode(source, Mode::Der, |cons| Self::take_from(cons))
+        Constructed::decode(source, Mode::Der, |cons| Self::from_sequence(cons))
       }
     }
 
@@ -125,7 +130,7 @@ AnyType!(RequestMessage);
 AnyType!(OtherMessageValue);
 
 #[derive(Clone)]
-pub(crate) struct PKIData
+pub struct PKIData
 {
   control_sequence: Vec<TaggedAttribute>,
   req_sequence: Vec<TaggedRequest>,
@@ -135,7 +140,7 @@ pub(crate) struct PKIData
 
 impl PKIData
 {
-  pub(crate) fn new(request: CertificationRequest, attributes: impl Iterator<Item = (Oid, Vec<AttributeValue>)>) -> Self
+  pub fn new(request: CertificationRequest, attributes: impl Iterator<Item = (Oid, Vec<AttributeValue>)>) -> Self
   {
     let body_part_id = Integer::from(1);
     Self
@@ -150,6 +155,19 @@ impl PKIData
       other_msg_sequence: vec![]
     }
   }
+
+  pub fn get_certificate_requests(&self) -> impl Iterator<Item = &'_ CertificationRequest>
+  {
+    self.req_sequence.iter().map(|request|
+    {
+      match request
+      {
+        TaggedRequest::TaggedCertificationRequest(tcr) => &tcr.certification_request,
+        TaggedRequest::CertificateRequestMessage(_) => todo!(),
+        TaggedRequest::OtherRequestMessage { .. } => todo!(),
+      }
+    })
+  }
 }
 
 impl PKIData
@@ -159,7 +177,7 @@ impl PKIData
     Tag::SEQUENCE
   }
 
-  pub(crate) fn encode_as(self, tag: Tag) -> impl encode::Values
+  pub fn encode_as(self, tag: Tag) -> impl encode::Values
   {
     encode::sequence_as(tag,
       (
@@ -170,7 +188,7 @@ impl PKIData
       ))
   }
 
-  pub(crate) fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
+  pub fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
   {
     encode::sequence_as(tag,
     (
@@ -181,57 +199,54 @@ impl PKIData
     ))
   }
 
-  fn take<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
+  fn take_from<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
   {
-    cons.take_sequence(|cons|
+    let control_sequence = cons.take_sequence(|cons|
     {
-      let control_sequence = cons.take_sequence(|cons|
+      let mut control_sequence = Vec::new();
+      while let Some(control) = TaggedAttribute::opt_from_sequence(cons)?
       {
-        let mut control_sequence = Vec::new();
-        while let Some(control) = TaggedAttribute::take_opt_from(cons)?
-        {
-          control_sequence.push(control);
-        }
-        Ok(control_sequence)
-      })?;
+        control_sequence.push(control);
+      }
+      Ok(control_sequence)
+    })?;
 
-      let req_sequence = cons.take_sequence(|cons|
+    let req_sequence = cons.take_sequence(|cons|
+    {
+      let mut req_sequence = Vec::new();
+      while let Some(req) = TaggedRequest::take_opt_from(cons)?
       {
-        let mut req_sequence = Vec::new();
-        while let Some(req) = TaggedRequest::take_opt_from(cons)?
-        {
-          req_sequence.push(req);
-        }
-        Ok(req_sequence)
-      })?;
+        req_sequence.push(req);
+      }
+      Ok(req_sequence)
+    })?;
 
-      let cms_sequence = cons.take_sequence(|cons|
+    let cms_sequence = cons.take_sequence(|cons|
+    {
+      let mut cms_sequence = Vec::new();
+      while let Some(cms) = TaggedContentInfo::opt_from_sequence(cons)?
       {
-        let mut cms_sequence = Vec::new();
-        while let Some(cms) = TaggedContentInfo::take_opt_from(cons)?
-        {
-          cms_sequence.push(cms);
-        }
-        Ok(cms_sequence)
-      })?;
+        cms_sequence.push(cms);
+      }
+      Ok(cms_sequence)
+    })?;
 
-      let other_msg_sequence = cons.take_sequence(|cons|
+    let other_msg_sequence = cons.take_sequence(|cons|
+    {
+      let mut other_msg_sequence = Vec::new();
+      while let Some(other_msg) = OtherMsg::opt_from_sequence(cons)?
       {
-        let mut other_msg_sequence = Vec::new();
-        while let Some(other_msg) = OtherMsg::take_opt_from(cons)?
-        {
-          other_msg_sequence.push(other_msg);
-        }
-        Ok(other_msg_sequence)
-      })?;
+        other_msg_sequence.push(other_msg);
+      }
+      Ok(other_msg_sequence)
+    })?;
 
-      Ok(Self
-      {
-        control_sequence,
-        req_sequence,
-        cms_sequence,
-        other_msg_sequence
-      })
+    Ok(Self
+    {
+      control_sequence,
+      req_sequence,
+      cms_sequence,
+      other_msg_sequence
     })
   }
 }
@@ -239,7 +254,7 @@ impl PKIData
 DeriveValues!(PKIData);
 
 #[derive(Clone)]
-pub(crate) struct TaggedAttribute
+pub struct TaggedAttribute
 {
   body_part_id: BodyPartID,
   attr_type: Oid,
@@ -253,7 +268,7 @@ impl TaggedAttribute
     Tag::SEQUENCE
   }
 
-  pub(crate) fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
+  pub fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
   {
     encode::sequence_as(tag,
     (
@@ -263,14 +278,14 @@ impl TaggedAttribute
     ))
   }
 
-  fn take<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
+  fn take_from<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
   {
     let body_part_id = Integer::take_from(cons)?;
     let attr_type = Oid::take_from(cons)?;
     let attr_values = cons.take_set(|cons|
       {
         let mut attr_values = Vec::new();
-        while let Some(attr_value) = AttributeValue::take_opt_from(cons)?
+        while let Some(attr_value) = AttributeValue::opt_from_constructed(cons)?
         {
           attr_values.push(attr_value);
         }
@@ -289,7 +304,7 @@ impl TaggedAttribute
 DeriveValues!(TaggedAttribute);
 
 #[derive(Clone)]
-pub(crate) enum TaggedRequest
+pub enum TaggedRequest
 {
   TaggedCertificationRequest(TaggedCertificationRequest),
   CertificateRequestMessage(CertificateRequestMessage),
@@ -314,7 +329,7 @@ impl TaggedRequest
   }
 
   #[auto_enum(Values)]
-  pub(crate) fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
+  pub fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
   {
     match self
     {
@@ -328,34 +343,80 @@ impl TaggedRequest
     }
   }
 
-  fn take<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
+  fn take_from_with_tag<S: Source>(tag: Tag, cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
   {
-    if let Some(tcr) = cons.take_opt_constructed_if(Tag::CTX_0, |cons| TaggedCertificationRequest::take_from(cons))?
+    match tag
     {
-      Ok(Self::TaggedCertificationRequest(tcr))
-    }
-    else if let Some(crm) = cons.take_opt_constructed_if(Tag::CTX_1, |cons| CertificateRequestMessage::take_from(cons))?
-    {
-      Ok(Self::CertificateRequestMessage(crm))
-    }
-    else
-    {
-      cons.take_sequence(|cons|
+      Tag::CTX_0 => Ok(Self::TaggedCertificationRequest(TaggedCertificationRequest::take_from(cons)?)),
+      Tag::CTX_1 => Ok(Self::CertificateRequestMessage(CertificateRequestMessage::take_from(cons)?)),
+      _ =>
       {
         let body_part_id = Integer::take_from(cons)?;
         let request_message_type = Oid::take_from(cons)?;
         let request_message_value = RequestMessage::take_from(cons)?;
 
         Ok(Self::OtherRequestMessage { body_part_id, request_message_type, request_message_value })
-      })
+      }
     }
   }
 }
 
-DeriveValues!(TaggedRequest);
+impl TaggedRequest
+{
+  pub fn encode_ref(&self) -> impl encode::Values + '_
+  {
+    self.encode_ref_as(self.default_tag())
+  }
+
+  pub fn encode_der(&self) -> Result<Vec<u8>, std::io::Error>
+  {
+    let mut buffer = Vec::new();
+    encode::Values::write_encoded(&self.encode_ref(), Mode::Der, &mut buffer)?;
+    Ok(buffer)
+  }
+
+  pub fn take_opt_from<S: Source>(cons: &mut Constructed<S>) -> Result<Option<Self>, DecodeError<S::Error>>
+  {
+    if let Some(res) = cons.take_opt_constructed_if(Tag::CTX_0, |cons| Self::take_from_with_tag(Tag::CTX_0, cons))?
+    {
+      Ok(Some(res))
+    }
+    else if let Some(res) = cons.take_opt_constructed_if(Tag::CTX_1, |cons| Self::take_from_with_tag(Tag::CTX_1, cons))?
+    {
+      Ok(Some(res))
+    }
+    else
+    {
+      cons.take_opt_constructed_if(Tag::CTX_2, |cons| Self::take_from_with_tag(Tag::CTX_2, cons))
+    }
+  }
+
+  pub fn take_from<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
+  {
+    cons.take_constructed(|tag, cons| Self::take_from_with_tag(tag, cons))
+  }
+
+  pub fn decode_der<S: Source, I: IntoSource<Source = S>>(source: I) -> Result<Self, DecodeError<S::Error>>
+  {
+    Constructed::decode(source, Mode::Der, |cons| Self::take_from(cons))
+  }
+}
+
+impl encode::Values for TaggedRequest
+{
+  fn encoded_len(&self, mode: Mode) -> usize
+  {
+    self.encode_ref().encoded_len(mode)
+  }
+
+  fn write_encoded<W: Write>(&self, mode: Mode, target: &mut W) -> Result<(), std::io::Error>
+  {
+    self.encode_ref().write_encoded(mode, target)
+  }
+}
 
 #[derive(Clone)]
-pub(crate) struct TaggedCertificationRequest
+pub struct TaggedCertificationRequest
 {
   body_part_id: BodyPartID,
   certification_request: CertificationRequest
@@ -368,7 +429,7 @@ impl TaggedCertificationRequest
     Tag::SEQUENCE
   }
 
-  pub(crate) fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
+  pub fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
   {
     encode::sequence_as(tag,
     (
@@ -377,7 +438,7 @@ impl TaggedCertificationRequest
     ))
   }
 
-  fn take<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
+  fn take_from<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
   {
     let body_part_id = Integer::take_from(cons)?;
     let certification_request = CertificationRequest::take_from(cons)?;
@@ -393,7 +454,7 @@ impl TaggedCertificationRequest
 DeriveValues!(TaggedCertificationRequest);
 
 #[derive(Clone)]
-pub(crate) struct TaggedContentInfo
+pub struct TaggedContentInfo
 {
   body_part_id: BodyPartID,
   content_info: ContentInfo
@@ -406,7 +467,7 @@ impl TaggedContentInfo
     Tag::SEQUENCE
   }
 
-  pub(crate) fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
+  pub fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
   {
     encode::sequence_as(tag,
     (
@@ -415,7 +476,7 @@ impl TaggedContentInfo
     ))
   }
 
-  fn take<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
+  fn take_from<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
   {
     let body_part_id = Integer::take_from(cons)?;
     let content_info = cons.take_sequence(|cons| ContentInfo::from_sequence(cons))?;
@@ -431,7 +492,7 @@ impl TaggedContentInfo
 DeriveValues!(TaggedContentInfo);
 
 #[derive(Clone)]
-pub(crate) struct OtherMsg
+pub struct OtherMsg
 {
   body_part_id: BodyPartID,
   other_msg_type: Oid,
@@ -445,7 +506,7 @@ impl OtherMsg
     Tag::SEQUENCE
   }
 
-  pub(crate) fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
+  pub fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
   {
     encode::sequence_as(tag,
     (
@@ -455,11 +516,11 @@ impl OtherMsg
     ))
   }
 
-  fn take<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
+  fn take_from<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
   {
     let body_part_id = Integer::take_from(cons)?;
     let other_msg_type = Oid::take_from(cons)?;
-    let other_msg_value = OtherMessageValue::take_from(cons)?;
+    let other_msg_value = OtherMessageValue::from_constructed(cons)?;
 
     Ok(Self
     {
@@ -473,11 +534,11 @@ impl OtherMsg
 DeriveValues!(OtherMsg);
 
 #[derive(Clone)]
-pub(crate) struct PKIResponse
+pub struct PKIResponse
 {
-  pub(crate) control_sequence: Vec<TaggedAttribute>,
-  pub(crate) cms_sequence: Vec<TaggedContentInfo>,
-  pub(crate) other_msg_sequence: Vec<OtherMsg>
+  pub control_sequence: Vec<TaggedAttribute>,
+  pub cms_sequence: Vec<TaggedContentInfo>,
+  pub other_msg_sequence: Vec<OtherMsg>
 }
 
 impl PKIResponse
@@ -487,7 +548,7 @@ impl PKIResponse
     Tag::SEQUENCE
   }
 
-  pub(crate) fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
+  pub fn encode_ref_as(&self, tag: Tag) -> impl encode::Values + '_
   {
     encode::sequence_as(tag,
     (
@@ -497,14 +558,14 @@ impl PKIResponse
     ))
   }
 
-  fn take<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
+  fn take_from<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
   {
     cons.take_sequence(|cons|
     {
       let control_sequence = cons.take_sequence(|cons|
       {
         let mut control_sequence = Vec::new();
-        while let Some(control) = TaggedAttribute::take_opt_from(cons)?
+        while let Some(control) = TaggedAttribute::opt_from_sequence(cons)?
         {
           control_sequence.push(control);
         }
@@ -514,7 +575,7 @@ impl PKIResponse
       let cms_sequence = cons.take_sequence(|cons|
       {
         let mut cms_sequence = Vec::new();
-        while let Some(cms) = TaggedContentInfo::take_opt_from(cons)?
+        while let Some(cms) = TaggedContentInfo::opt_from_sequence(cons)?
         {
           cms_sequence.push(cms);
         }
@@ -524,7 +585,7 @@ impl PKIResponse
       let other_msg_sequence = cons.take_sequence(|cons|
       {
         let mut other_msg_sequence = Vec::new();
-        while let Some(other_msg) = OtherMsg::take_opt_from(cons)?
+        while let Some(other_msg) = OtherMsg::opt_from_sequence(cons)?
         {
           other_msg_sequence.push(other_msg);
         }

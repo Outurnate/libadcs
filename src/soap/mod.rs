@@ -6,9 +6,11 @@ use yaserde::ser;
 use self::schema::{Fault, Header};
 use self::xml_helpers::{ElementExt, to_string_with_config_and_start};
 
-pub mod schema;
+mod schema;
 mod http;
 mod xml_helpers;
+
+pub use schema::*;
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
