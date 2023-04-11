@@ -132,42 +132,10 @@ AnyType!(OtherMessageValue);
 #[derive(Clone)]
 pub struct PKIData
 {
-  control_sequence: Vec<TaggedAttribute>,
-  req_sequence: Vec<TaggedRequest>,
-  cms_sequence: Vec<TaggedContentInfo>,
-  other_msg_sequence: Vec<OtherMsg>
-}
-
-impl PKIData
-{
-  pub fn new(request: CertificationRequest, attributes: impl Iterator<Item = (Oid, Vec<AttributeValue>)>) -> Self
-  {
-    let body_part_id = Integer::from(1);
-    Self
-    {
-      control_sequence: attributes.map(|attribute| TaggedAttribute { body_part_id: body_part_id.clone(), attr_type: attribute.0, attr_values: attribute.1 }).collect(),
-      req_sequence: vec![TaggedRequest::TaggedCertificationRequest(TaggedCertificationRequest
-      {
-        body_part_id,
-        certification_request: request
-      })],
-      cms_sequence: vec![],
-      other_msg_sequence: vec![]
-    }
-  }
-
-  pub fn get_certificate_requests(&self) -> impl Iterator<Item = &'_ CertificationRequest>
-  {
-    self.req_sequence.iter().map(|request|
-    {
-      match request
-      {
-        TaggedRequest::TaggedCertificationRequest(tcr) => &tcr.certification_request,
-        TaggedRequest::CertificateRequestMessage(_) => todo!(),
-        TaggedRequest::OtherRequestMessage { .. } => todo!(),
-      }
-    })
-  }
+  pub control_sequence: Vec<TaggedAttribute>,
+  pub req_sequence: Vec<TaggedRequest>,
+  pub cms_sequence: Vec<TaggedContentInfo>,
+  pub other_msg_sequence: Vec<OtherMsg>
 }
 
 impl PKIData
@@ -256,9 +224,9 @@ DeriveValues!(PKIData);
 #[derive(Clone)]
 pub struct TaggedAttribute
 {
-  body_part_id: BodyPartID,
-  attr_type: Oid,
-  attr_values: Vec<AttributeValue>
+  pub body_part_id: BodyPartID,
+  pub attr_type: Oid,
+  pub attr_values: Vec<AttributeValue>
 }
 
 impl TaggedAttribute
@@ -418,8 +386,8 @@ impl encode::Values for TaggedRequest
 #[derive(Clone)]
 pub struct TaggedCertificationRequest
 {
-  body_part_id: BodyPartID,
-  certification_request: CertificationRequest
+  pub body_part_id: BodyPartID,
+  pub certification_request: CertificationRequest
 }
 
 impl TaggedCertificationRequest

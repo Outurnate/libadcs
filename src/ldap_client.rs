@@ -2,7 +2,7 @@ use libdcerpc::{ms_icpr::{CertPassage, DWFlags, CertificateServerResponse}, Prot
 use x509_certificate::{rfc2986::CertificationRequest, X509Certificate};
 use log::{log, Level};
 
-use crate::{CertificateClientImplementation, ldap::{LdapManager, LdapEnrollmentService, LdapCertificateTemplate}, NamedCertificate, AdcsError, EnrollmentResponse, cmc::{CmcRequest, CmcResponse}};
+use crate::{CertificateClientImplementation, ldap::{LdapManager, LdapEnrollmentService, LdapCertificateTemplate}, NamedCertificate, AdcsError, EnrollmentResponse, cmc::{CmcRequest, CmcResponse, CmcRequestBuilder}};
 
 pub struct LdapCertificateClient
 {
@@ -35,7 +35,10 @@ impl CertificateClientImplementation for LdapCertificateClient
         let spn = format!("host/{}", enrollment_service.get_endpoint());
         log!(Level::Trace, "trying to connect to rpc endpoint {} with spn {}", endpoint, spn);
         let mut client = CertPassage::new(Protocol::Tcp, endpoint, &spn).unwrap();
-        let request: Vec<u8> = CmcRequest::new(request, template.get_attributes()).try_into()?;
+        let request: Vec<u8> = CmcRequestBuilder::default()
+          .add_certificate(request, template.get_attributes())
+          .build()
+          .try_into()?;
         match client.cert_server_request(DWFlags::REQUEST_TYPE_CMC | DWFlags::CMC_FULL_PKI_RESPONSE, &enrollment_service.get_certificate().nickname, None, "", request.as_slice())
         {
           CertificateServerResponse
