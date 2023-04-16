@@ -9,16 +9,18 @@ mod http_client;
 mod cmc;
 mod soap;
 mod soap_operations;
+mod client;
 
-use std::{fmt::Display, convert::Infallible};
-use bcder::decode::DecodeError;
+use client::{EnrollmentResponse, CertificateClientImplementation, CertificateClient, ClientError};
+pub use reqwest::Url;
+
+use std::fmt::Display;
 use cryptographic_message_syntax::CmsError;
 use http_client::HttpCertificateClient;
 use ldap::LdapManager;
 use ldap3::LdapError;
 use ldap_client::LdapCertificateClient;
 use thiserror::Error;
-use url::Url;
 use x509_certificate::{X509Certificate, rfc2986::CertificationRequest, X509CertificateError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,22 +49,15 @@ pub enum AdcsError
   LdapConnectionFailed(#[from] LdapError),
   #[error("unknown endpoint scheme: {0}")]
   UnknownEndpointScheme(String),
-  #[error("requested template {0} not found")]
-  TemplateNotFound(String),
-  #[error("no enrollment service found for template {0}")]
-  NoEnrollmentServiceFound(String),
-  #[error("encoutered invalid x.509 certificate: {0}")]
-  BadX509Certificate(#[from] X509CertificateError),
-  #[error("cmc encoding error: {0}")]
-  CmcEncodeError(#[from] CmsError),
-  #[error("cmc decoding error: {0}")]
-  CmcDecodeError(#[from] DecodeError<Infallible>),
   #[error("could not locate global catalog server")]
   NoGlobalCatalogServer,
   #[error("no rootdse (is this active directory???)")]
   NoRootDSE,
   #[error("could not locate ourselves in global catalog")]
-  NoMyself
+  NoMyself,
+
+  #[error("client error: {0}")]
+  Client(#[from] ClientError)
 }
 
 type Result<T> = std::result::Result<T, AdcsError>;
@@ -70,7 +65,7 @@ type Result<T> = std::result::Result<T, AdcsError>;
 pub struct CertificateServicesClient
 {
   root_certificates: Vec<NamedCertificate>,
-  implementation: Box<dyn CertificateClientImplementation>
+  implementation: Box<dyn CertificateClient>
 }
 
 impl CertificateServicesClient
@@ -79,31 +74,26 @@ impl CertificateServicesClient
   {
     let mut ldap = LdapManager::new(forest, tls)?;
     let root_certificates = ldap.get_root_certificates()?;
-    let implementation = match endpoint.scheme().to_lowercase().as_str()
-    {
-      "https" => Ok(Box::new(HttpCertificateClient::new(endpoint)) as Box<dyn CertificateClientImplementation>),
-      "ldap" => Ok(Box::new(LdapCertificateClient::new(ldap)?) as Box<dyn CertificateClientImplementation>),
-      scheme => Err(AdcsError::UnknownEndpointScheme(scheme.to_owned()))
-    }?;
     Ok(Self
     {
       root_certificates,
-      implementation
+      implementation: match endpoint.scheme().to_lowercase().as_str()
+      {
+        "https" => Ok(Box::new(HttpCertificateClient::new(endpoint)) as Box<dyn CertificateClient>),
+        "ldap" => Ok(Box::new(LdapCertificateClient::new(ldap)?) as Box<dyn CertificateClient>),
+        scheme => Err(AdcsError::UnknownEndpointScheme(scheme.to_owned()))
+      }?
     })
   }
 
-  pub fn root_certificates(&self) -> Vec<&'_ NamedCertificate>
+  pub fn root_certificates(&self) -> &Vec<NamedCertificate>
   {
-    self.root_certificates.iter().collect()
+    self.implementation.root_certificates()
   }
 
   pub fn chain_certificates(&self) -> Vec<&'_ NamedCertificate>
   {
-    self.implementation
-      .chain_certificates()
-      .into_iter()
-      .filter(|named_certificate| !self.root_certificates.contains(named_certificate))
-      .collect()
+    self.implementation.chain_certificates()
   }
 
   pub fn template_names(&self) -> Vec<&'_ str>
@@ -117,20 +107,22 @@ impl CertificateServicesClient
   }
 }
 
-trait CertificateClientImplementation
+#[derive(Error, Debug)]
+pub enum DecodeError
 {
-  fn chain_certificates(&self) -> Vec<&'_ NamedCertificate>;
-  fn templates(&self) -> Vec<&'_ str>;
-  fn submit(&self, request: CertificationRequest, template: &str) -> Result<EnrollmentResponse>;
+  #[error("bad base64: {0}")]
+  BadBase64(#[from] base64::DecodeError),
+
+  #[error("bad certificate: {0}")]
+  BadDer(#[from] x509_certificate::X509CertificateError),
+
+  #[error("bad cms: {0}")]
+  BadCms(#[from] cryptographic_message_syntax::CmsError)
 }
 
-pub enum EnrollmentResponse
+#[derive(Error, Debug)]
+pub enum EncodeError
 {
-  Issued
-  {
-    entity: X509Certificate,
-    chain: Vec<X509Certificate>
-  },
-  Pending(u32),
-  Rejected(String)
+  #[error("bad cms: {0}")]
+  BadCms(#[from] cryptographic_message_syntax::CmsError)
 }

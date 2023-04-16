@@ -1,25 +1,47 @@
+use chrono::{DateTime, Local};
+use log::warn;
+use x509_certificate::X509Certificate;
 use yaserde_derive::{YaDeserialize, YaSerialize};
+use base64::{Engine as _, engine::general_purpose};
+
+use crate::{NamedCertificate, DecodeError, client::{EnrollmentService, Policy}};
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
 struct Client
 {
   #[yaserde(rename = "lastUpdate", prefix = "xcep")]
-  last_update: String,
+  last_update: Option<String>,
 
   #[yaserde(rename = "preferredLanguage", prefix = "xcep")]
-  preferred_language: String
+  preferred_language: Option<String>
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
-#[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
-pub struct GetPoliciesType
+#[yaserde(prefix = "soap", namespace = "soap: http://www.w3.org/2003/05/soap-envelope")]
+pub struct GetPoliciesRequest
 {
   #[yaserde(rename = "client", prefix = "xcep")]
-  client: Client,
+  client: Option<Client>,
 
   #[yaserde(rename = "requestFilter", prefix = "xcep")]
-  request_filter: RequestFilter
+  request_filter: Option<RequestFilter>
+}
+
+impl GetPoliciesRequest
+{
+  pub fn new(last_update: DateTime<Local>) -> Self
+  {
+    Self
+    {
+      client: Some(Client
+      {
+        last_update: Some(last_update.format("%+").to_string()),
+        ..Default::default()
+      }),
+      request_filter: None
+    }
+  }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
@@ -45,17 +67,62 @@ struct PolicyOiDsType
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
-#[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
-pub struct GetPoliciesResponseType
+#[yaserde(prefix = "soap", namespace = "soap: http://www.w3.org/2003/05/soap-envelope")]
+pub struct GetPoliciesResponse
 {
   #[yaserde(rename = "response", prefix = "xcep")]
   response: Response,
 
   #[yaserde(rename = "cAs", prefix = "xcep")]
-  c_as: CAsType,
+  certificate_authorities: CertificateAuthorities,
 
   #[yaserde(rename = "oIDs", prefix = "xcep")]
-  o_i_ds: OiDsType
+  oids: OiDsType
+}
+
+impl GetPoliciesResponse
+{
+  fn into_policy(self, root_certificates: Vec<NamedCertificate>) -> Policy<CertificateAuthorityEndpoints>
+  {
+    let templates: Vec<_> = self.response.templates.templates
+      .into_iter()
+      .map(|template|
+      {
+        let permission = template.attributes.permission.unwrap_or_default();
+        (template.certificate_authorities.ids, crate::client::CertificateTemplate
+        {
+          cn: template.attributes.common_name,
+          enroll: permission.enroll,
+          auto_enroll: permission.auto_enroll
+        })
+      })
+      .collect();
+    let enrollment_services = self.certificate_authorities.cas
+      .into_iter()
+      .map(|ca|
+      {
+        let certificate = X509Certificate::from_der(general_purpose::STANDARD.decode(ca.certificate)?)?;
+        let nickname = certificate.subject_common_name().unwrap_or_default();
+        let certificate = NamedCertificate { nickname, certificate };
+        Ok(EnrollmentService
+        {
+          endpoint: ca.endpoints.unwrap_or_default(),
+          certificate,
+          template_names: templates
+            .iter()
+            .filter(|template| template.0.iter().any(|id| *id == ca.reference_id))
+            .map(|template| template.1.cn.to_string()).collect()
+        })
+      })
+      .filter_map(|r| r.map_err(|e: DecodeError| warn!("invalid enrollment service: {}", e)).ok())
+      .collect();
+    Policy
+    {
+      enrollment_services,
+      templates: templates.into_iter().map(|template| template.1).collect(),
+      root_certificates
+    }
+  }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
@@ -75,37 +142,37 @@ struct Response
   policies_not_changed: bool,
 
   #[yaserde(rename = "policies", prefix = "xcep")]
-  policies: CertificateEnrollmentPoliciesType
+  templates: CertificateTemplates
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
-struct CertificateEnrollmentPoliciesType
+struct CertificateTemplates
 {
   #[yaserde(rename = "policy", prefix = "xcep")]
-  policys: Vec<CertificateEnrollmentPolicy>
+  templates: Vec<CertificateTemplate>
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
-struct CertificateEnrollmentPolicy
+struct CertificateTemplate
 {
   #[yaserde(rename = "policyOIDReference", prefix = "xcep")]
   policy_oid_reference: i32,
 
   #[yaserde(rename = "cAs", prefix = "xcep")]
-  c_as: CaReferencesType,
+  certificate_authorities: CertificateAuthorityReferences,
 
   #[yaserde(rename = "attributes", prefix = "xcep")]
-  attributes: Option<Attributes>
+  attributes: Attributes
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
-struct CaReferencesType
+struct CertificateAuthorityReferences
 {
   #[yaserde(rename = "cAReference", prefix = "xcep")]
-  c_a_references : Vec <i32>
+  ids: Vec<i32>
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
@@ -113,7 +180,7 @@ struct CaReferencesType
 struct Attributes
 {
   #[yaserde(rename = "commonName", prefix = "xcep")]
-  common_name: Option<String>,
+  common_name: String,
 
   #[yaserde(rename = "policySchema", prefix = "xcep")]
   policy_schema: u32,
@@ -287,46 +354,46 @@ struct Extension
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
-struct CAsType
+struct CertificateAuthorities
 {
   #[yaserde(rename = "cA", prefix = "xcep")]
-  c_as: Vec<Ca>
+  cas: Vec<CertificateAuthority>
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
-struct Ca
+struct CertificateAuthority
 {
   #[yaserde(rename = "uris", prefix = "xcep")]
-  uris: Option<CaurIsType>,
+  endpoints: Option<CertificateAuthorityEndpoints>,
 
   #[yaserde(rename = "certificate", prefix = "xcep")]
-  certificate: Option<String>,
+  certificate: String,
 
   #[yaserde(rename = "enrollPermission", prefix = "xcep")]
   enroll_permission: bool,
 
   #[yaserde(rename = "cAReferenceID", prefix = "xcep")]
-  c_a_reference_id: i32
+  reference_id: i32
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
-struct CaurIsType
+pub struct CertificateAuthorityEndpoints
 {
   #[yaserde(rename = "cAURI", prefix = "xcep")]
-  c_auris: Vec<Cauri>
+  endpoints: Vec<CertificateAuthorityEndpoint>
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
-struct Cauri
+struct CertificateAuthorityEndpoint
 {
   #[yaserde(rename = "clientAuthentication", prefix = "xcep")]
   client_authentication: u32,
 
   #[yaserde(rename = "uri", prefix = "xcep")]
-  uri: Option<String>,
+  uri: String,
   
   #[yaserde(rename = "priority", prefix = "xcep")]
   priority: u32,

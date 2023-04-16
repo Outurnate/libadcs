@@ -11,6 +11,7 @@ use tokio::runtime::Runtime;
 use trust_dns_resolver::ConnectionProvider;
 use trust_dns_resolver::error::ResolveError;
 use trust_dns_resolver::proto::DnsHandle;
+use crate::client::{EnrollmentService, CertificateTemplate};
 use crate::{NamedCertificate, AdcsError};
 use crate::cmc::rfc5272::AttributeValue;
 use crate::sddl::{SDDL, AUTO_ENROLL, ENROLL, SID};
@@ -236,9 +237,56 @@ impl LdapManager
     }
   }
 
-  pub fn get_certificate_templates(&mut self) -> Result<Vec<LdapCertificateTemplate>, LdapError>
+  pub fn get_certificate_templates(&mut self) -> Result<Vec<CertificateTemplate>, LdapError>
   {
-    LdapCertificateTemplate::from_query(&mut self.ldap, &self.rootdse, Scope::OneLevel, "(objectClass=pKICertificateTemplate)", &self.me, &mut self.group_cache)
+    let (results, _) = self.ldap.search(&self.rootdse.certificate_templates, Scope::OneLevel, "(objectClass=pKICertificateTemplate)", vec!["cn", "nTSecurityDescriptor"])?.success()?;
+
+    let mut predicate = |sid: &SID| -> Result<bool, LdapError>
+    {
+      if &self.me.object_sid == sid
+      {
+        Ok(true)
+      }
+      else
+      {
+        match self.group_cache.get(sid)
+        {
+          Some(result) => Ok(result.to_owned()),
+          None =>
+          {
+            let result = is_member_of(&mut self.ldap, &self.rootdse, sid.clone(), self.me.object_sid.clone())?;
+            self.group_cache.insert(sid.clone(), result);
+            Ok(result)
+          }
+        }
+      }
+    };
+
+    Ok(results.into_iter().filter_map(|result|
+    {
+      let result = SearchEntry::construct(result);
+      let permissions = match result.bin_attrs.get("nTSecurityDescriptor").and_then(|v| v.iter().next())
+      {
+        Some(security_descriptor) =>
+        {
+          match SDDL::new(security_descriptor)
+          {
+            Ok(sddl) => Some((
+              sddl.dacl.as_ref().unwrap().has_object_permission(&ENROLL, &mut predicate).unwrap(),
+              sddl.dacl.as_ref().unwrap().has_object_permission(&AUTO_ENROLL, &mut predicate).unwrap())),
+            Err(err) => { log!(Level::Warn, "invalid sddl: {}", err); None }
+          }
+        }
+        None => None,
+      };
+      let cn = result.attrs.get("cn").and_then(|v| v.iter().next().map(|v| v.to_owned()));
+
+      match (cn, permissions)
+      {
+        (Some(cn), Some((enroll, auto_enroll))) => Some(CertificateTemplate { cn, enroll, auto_enroll }),
+        _ => None
+      }
+    }).collect())
   }
 
   pub fn get_root_certificates(&mut self) -> Result<Vec<NamedCertificate>, LdapError>
@@ -267,9 +315,32 @@ impl LdapManager
     }).collect::<Vec<_>>())
   }
 
-  pub fn get_enrollment_service(&mut self) -> Result<Vec<LdapEnrollmentService>, LdapError>
+  pub fn get_enrollment_service(&mut self) -> Result<Vec<EnrollmentService<String>>, LdapError>
   {
-    LdapEnrollmentService::from_query(&mut self.ldap, &self.rootdse, Scope::OneLevel, "(objectClass=pKIEnrollmentService)")
+    let (rs, _) = self.ldap.search(&self.rootdse.enrollment_services, Scope::OneLevel, "(objectClass=pKIEnrollmentService)", vec!["cn", "dNSHostName", "cACertificate", "certificateTemplates"])?.success()?;
+    Ok(rs.into_iter().filter_map(|rs|
+    {
+      let rs = SearchEntry::construct(rs);
+      match
+      (
+        rs.attrs.get("cn").and_then(|v| v.first().map(|v| v.to_owned())),
+        rs.attrs.get("dNSHostName").and_then(|v| v.first().map(|v| v.to_owned())),
+        rs.bin_attrs.get("cACertificate").and_then(|v| v.first().and_then(|v| match X509Certificate::from_der(v)
+        {
+          Ok(certificate) => Some(certificate),
+          Err(err) => { log!(Level::Warn, "invalid enrollment service certificate: {}", err); None }
+        })),
+        rs.attrs.get("certificateTemplates").map(|v| v.to_vec())
+      )
+      {
+        (Some(cn), Some(host_name), Some(certificate), Some(templates)) =>
+        {
+          log!(Level::Info, "found enrollment service {}", cn);
+          Some(EnrollmentService { endpoint: host_name, certificate: NamedCertificate { nickname: cn, certificate }, template_names: templates })
+        },
+        _ => None
+      }
+    }).collect())
   }
 }
 
@@ -304,130 +375,5 @@ impl LdapPrincipal
         _ => None
       }
     }).collect::<Vec<Self>>())
-  }
-}
-
-pub struct LdapCertificateTemplate
-{
-  cn: String,
-  enroll: bool,
-  auto_enroll: bool
-}
-
-impl LdapCertificateTemplate
-{
-  fn from_query(ldap: &mut LdapConn, rootdse: &RootDSE, scope: Scope, filter: &str, me: &LdapPrincipal, group_cache: &mut HashMap<SID, bool>) -> Result<Vec<Self>, LdapError>
-  {
-    let (results, _) = ldap.search(&rootdse.certificate_templates, scope, filter, vec!["cn", "nTSecurityDescriptor"])?.success()?;
-
-    let mut predicate = |sid: &SID| -> Result<bool, LdapError>
-    {
-      if &me.object_sid == sid
-      {
-        Ok(true)
-      }
-      else
-      {
-        match group_cache.get(sid)
-        {
-          Some(result) => Ok(result.to_owned()),
-          None =>
-          {
-            let result = is_member_of(ldap, rootdse, sid.clone(), me.object_sid.clone())?;
-            group_cache.insert(sid.clone(), result);
-            Ok(result)
-          }
-        }
-      }
-    };
-
-    Ok(results.into_iter().filter_map(|result|
-    {
-      let result = SearchEntry::construct(result);
-      let permissions = match result.bin_attrs.get("nTSecurityDescriptor").and_then(|v| v.iter().next())
-      {
-        Some(security_descriptor) =>
-        {
-          match SDDL::new(security_descriptor)
-          {
-            Ok(sddl) => Some((
-              sddl.dacl.as_ref().unwrap().has_object_permission(&ENROLL, &mut predicate).unwrap(),
-              sddl.dacl.as_ref().unwrap().has_object_permission(&AUTO_ENROLL, &mut predicate).unwrap())),
-            Err(err) => { log!(Level::Warn, "invalid sddl: {}", err); None }
-          }
-        }
-        None => None,
-      };
-      let cn = result.attrs.get("cn").and_then(|v| v.iter().next().map(|v| v.to_owned()));
-
-      match (cn, permissions)
-      {
-        (Some(cn), Some((enroll, auto_enroll))) => Some(Self { cn, enroll, auto_enroll }),
-        _ => None
-      }
-    }).collect::<Vec<_>>())
-  }
-
-  pub fn get_name(&self) -> &'_ str
-  {
-    &self.cn
-  }
-
-  pub(crate) fn get_attributes(&self) -> impl Iterator<Item = (Oid, Vec<AttributeValue>)>
-  {
-    vec![].into_iter() // TODO
-  }
-}
-
-pub struct LdapEnrollmentService
-{
-  host_name: String,
-  certificate: NamedCertificate,
-  templates: Vec<String>
-}
-
-impl LdapEnrollmentService
-{
-  fn from_query(ldap: &mut LdapConn, rootdse: &RootDSE, scope: Scope, filter: &str) -> Result<Vec<Self>, LdapError>
-  {
-    let (rs, _) = ldap.search(&rootdse.enrollment_services, scope, filter, vec!["cn", "dNSHostName", "cACertificate", "certificateTemplates"])?.success()?;
-    Ok(rs.into_iter().filter_map(|rs|
-    {
-      let rs = SearchEntry::construct(rs);
-      match
-      (
-        rs.attrs.get("cn").and_then(|v| v.first().map(|v| v.to_owned())),
-        rs.attrs.get("dNSHostName").and_then(|v| v.first().map(|v| v.to_owned())),
-        rs.bin_attrs.get("cACertificate").and_then(|v| v.first().and_then(|v| match X509Certificate::from_der(v)
-        {
-          Ok(certificate) => Some(certificate),
-          Err(err) => { log!(Level::Warn, "invalid enrollment service certificate: {}", err); None }
-        })),
-        rs.attrs.get("certificateTemplates").map(|v| v.to_vec())
-      )
-      {
-        (Some(cn), Some(host_name), Some(certificate), Some(templates)) =>
-        {
-          log!(Level::Info, "found enrollment service {}", cn);
-          Some(Self { host_name, certificate: NamedCertificate { nickname: cn, certificate }, templates })
-        },
-        _ => None
-      }
-    }).collect::<Vec<Self>>())
-  }
-
-  pub fn get_certificate(&self) -> &'_ NamedCertificate
-  {
-    &self.certificate
-  }
-
-  pub fn has_template(&self, template: &str) -> bool
-  {
-    self.templates.iter().any(|x| template == x)
-  }
-
-  pub fn get_endpoint(&self) -> &'_ str
-  {
-    &self.host_name
   }
 }

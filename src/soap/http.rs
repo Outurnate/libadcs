@@ -3,6 +3,7 @@ use cross_krb5::{ClientCtx, InitiateFlags, Step, PendingClientCtx};
 use reqwest::{blocking::{Client, Body}, IntoUrl, StatusCode, header};
 use base64::{Engine as _, engine::general_purpose};
 use thiserror::Error;
+use url::ParseError;
 
 use super::{SoapBody, schema::Header};
 
@@ -18,35 +19,40 @@ pub enum Error
   #[error("gssapi error: {0}")]
   Gssapi(#[from] anyhow::Error),
   #[error("http response didn't contain www-authenticate header")]
-  NoAuthenticateHeader
+  NoAuthenticateHeader,
+  #[error("soap protocol fault: {0}")]
+  SoapTransport(#[from] super::Error),
+  #[error("soap action is not a valid url: {0}")]
+  SoapActionParse(#[from] ParseError)
 }
 
-struct SoapClient
+pub struct SoapClient
 {
   http_client: Client
 }
 
 impl SoapClient
 {
-  fn new() -> Self
+  pub fn new() -> Self
   {
     Self { http_client: Client::new() }
   }
 
-  fn invoke<S: SoapBody, R: SoapBody>(&self, header: &Header, body: &S) -> Result<R, Error>
+  pub fn invoke<S: SoapBody, R: SoapBody>(&self, header: &Header, body: &S) -> Result<R, Error>
   {
-    let spn = ""; // TODO
-    let mut request = SoapClientRequest::new(&self.http_client, spn)?;
-    let body = body.clone_to_soap(header).unwrap();
+    let action = header.get_action().unwrap()?;
+    let spn = format!("HTTP/{}", action.host_str().unwrap());
+    let mut request = SoapClientRequest::new(&self.http_client, &spn)?;
+    let body = body.clone_to_soap(header)?;
     let response = loop
     {
-      match request.step(header.get_action().unwrap(), body.clone())?
+      match request.step(action.as_str(), body.clone())?
       {
         Some(bytes) => break bytes,
         None => continue
       }
     };
-    Ok(R::from_soap(&*response).unwrap().1)
+    Ok(R::from_soap(&*response)?.1)
   }
 }
 

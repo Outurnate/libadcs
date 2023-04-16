@@ -11,6 +11,7 @@ mod http;
 mod xml_helpers;
 
 pub use schema::*;
+pub use http::SoapClient;
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]

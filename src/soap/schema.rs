@@ -1,4 +1,6 @@
 use derive_builder::Builder;
+use reqwest::Url;
+use url::ParseError;
 use yaserde_derive::{YaDeserialize, YaSerialize};
 use std::fmt::{Display, Formatter};
 
@@ -144,9 +146,9 @@ pub struct Header
 
 impl Header
 {
-  pub fn get_action(&self) -> Option<&'_ str>
+  pub fn get_action(&self) -> Option<Result<Url, ParseError>>
   {
-    self.action.as_deref()
+    self.action.as_ref().map(|url| Url::parse(url.as_str()))
   }
 }
 

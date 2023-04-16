@@ -2,44 +2,38 @@ use libdcerpc::{ms_icpr::{CertPassage, DWFlags, CertificateServerResponse}, Prot
 use x509_certificate::{rfc2986::CertificationRequest, X509Certificate};
 use log::{log, Level};
 
-use crate::{CertificateClientImplementation, ldap::{LdapManager, LdapEnrollmentService, LdapCertificateTemplate}, NamedCertificate, AdcsError, EnrollmentResponse, cmc::{CmcRequest, CmcResponse, CmcRequestBuilder}};
+use crate::{ldap::{LdapManager}, AdcsError, cmc::CmcRequestBuilder, client::{EnrollmentService, CertificateTemplate, CertificateClientImplementation, Policy, EnrollmentResponse}};
 
 pub struct LdapCertificateClient
 {
-  enrollment_services: Vec<LdapEnrollmentService>,
-  templates: Vec<LdapCertificateTemplate>
+  enrollment_services: Vec<EnrollmentService<String>>,
+  templates: Vec<CertificateTemplate>
 }
 
 impl CertificateClientImplementation for LdapCertificateClient
 {
-  fn chain_certificates(&self) -> Vec<&'_ NamedCertificate>
-  {
-    self.enrollment_services
-      .iter()
-      .map(|service| service.get_certificate())
-      .collect()
-  }
+  type Endpoint = String;
 
-  fn templates(&self) -> Vec<&'_ str>
+  fn get_policy(&self) -> &Policy<Self::Endpoint>
   {
-    self.templates.iter().map(|template| template.get_name()).collect()
+    todo!()
   }
 
   fn submit(&self, request: CertificationRequest, template_name: &str) -> Result<EnrollmentResponse, AdcsError>
   {
-    if let Some(template) = self.templates.iter().find(|x| x.get_name() == template_name)
+    if let Some(template) = self.templates.iter().find(|x| x.cn == template_name)
     {
       if let Some(enrollment_service) = self.enrollment_services.iter().skip(1).find(|x| x.has_template(template_name))
       {
-        let endpoint = enrollment_service.get_endpoint();
-        let spn = format!("host/{}", enrollment_service.get_endpoint());
+        let endpoint = &enrollment_service.endpoint;
+        let spn = format!("host/{}", endpoint);
         log!(Level::Trace, "trying to connect to rpc endpoint {} with spn {}", endpoint, spn);
         let mut client = CertPassage::new(Protocol::Tcp, endpoint, &spn).unwrap();
         let request: Vec<u8> = CmcRequestBuilder::default()
           .add_certificate(request, template.get_attributes())
           .build()
           .try_into()?;
-        match client.cert_server_request(DWFlags::REQUEST_TYPE_CMC | DWFlags::CMC_FULL_PKI_RESPONSE, &enrollment_service.get_certificate().nickname, None, "", request.as_slice())
+        match client.cert_server_request(DWFlags::REQUEST_TYPE_CMC | DWFlags::CMC_FULL_PKI_RESPONSE, &enrollment_service.certificate.nickname, None, "", request.as_slice())
         {
           CertificateServerResponse
           {

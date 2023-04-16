@@ -9,7 +9,6 @@ x509-certificate.workspace = true
 bcder.workspace = true
 thiserror.workspace = true
 log.workspace = true
-url.workspace = true
 simple_logger = { version = "4.0.0", features = ["stderr"] }
 libadcs = { path = ".." }
 pem = "1.1.1"
