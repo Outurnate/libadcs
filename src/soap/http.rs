@@ -3,6 +3,7 @@ use cross_krb5::{ClientCtx, InitiateFlags, Step, PendingClientCtx};
 use reqwest::{blocking::{Client, Body}, IntoUrl, StatusCode, header};
 use base64::{Engine as _, engine::general_purpose};
 use thiserror::Error;
+use tracing::{instrument, event, Level};
 use url::ParseError;
 
 use super::{SoapBody, schema::Header};
@@ -21,7 +22,7 @@ pub enum Error
   #[error("http response didn't contain www-authenticate header")]
   NoAuthenticateHeader,
   #[error("soap protocol fault: {0}")]
-  SoapTransport(#[from] super::Error),
+  SoapTransport(#[from] super::SoapError),
   #[error("soap action is not a valid url: {0}")]
   SoapActionParse(#[from] ParseError)
 }
@@ -76,8 +77,10 @@ impl<'a> SoapClientRequest<'a>
     })
   }
 
-  fn post(&self, endpoint: impl IntoUrl, body: impl Into<Body>, token: &[u8]) -> Result<(Vec<u8>, StatusCode, Bytes), Error>
+  #[instrument(skip(self, token))]
+  fn post(&self, endpoint: impl IntoUrl + std::fmt::Debug, body: impl Into<Body> + std::fmt::Debug, token: &[u8]) -> Result<(Vec<u8>, StatusCode, Bytes), Error>
   {
+    event!(Level::TRACE, "posting to endpoint");
     let res = self.http_client.post(endpoint)
       .header(header::AUTHORIZATION, format!("Negotiate {}", general_purpose::STANDARD_NO_PAD.encode(token)))
       .body(body)
@@ -91,15 +94,18 @@ impl<'a> SoapClientRequest<'a>
         .map(|split_point| general_purpose::STANDARD_NO_PAD.decode(auth.split_at(split_point).1))
     })
     {
+      event!(Level::TRACE, "WWW-Authenticate header is valid");
       Ok((token?, res.status(), res.bytes()?))
     }
     else
     {
+      event!(Level::TRACE, "WWW-Authenticate header is invalid or missing");
       Err(Error::NoAuthenticateHeader)
     }
   }
 
-  fn step(&mut self, endpoint: impl IntoUrl, body: impl Into<Body>) -> Result<Option<Bytes>, Error>
+  #[instrument(skip(self))]
+  fn step(&mut self, endpoint: impl IntoUrl + std::fmt::Debug, body: impl Into<Body> + std::fmt::Debug) -> Result<Option<Bytes>, Error>
   {
     let (received_token, status, body) = self.post(endpoint, body, &self.token)?;
     match status

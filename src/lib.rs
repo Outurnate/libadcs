@@ -11,17 +11,17 @@ mod soap;
 mod soap_operations;
 mod client;
 
-use client::{EnrollmentResponse, CertificateClientImplementation, CertificateClient, ClientError};
 pub use reqwest::Url;
+pub use client::EnrollmentResponse;
 
+use client::{CertificateClient, ClientError};
+use soap::SoapError;
 use std::fmt::Display;
-use cryptographic_message_syntax::CmsError;
 use http_client::HttpCertificateClient;
-use ldap::LdapManager;
-use ldap3::LdapError;
+use ldap::{LdapManager, LdapError};
 use ldap_client::LdapCertificateClient;
 use thiserror::Error;
-use x509_certificate::{X509Certificate, rfc2986::CertificationRequest, X509CertificateError};
+use x509_certificate::{X509Certificate, rfc2986::CertificationRequest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NamedCertificate
@@ -45,26 +45,23 @@ impl Display for NamedCertificate
 #[derive(Error, Debug)]
 pub enum AdcsError
 {
-  #[error("ldap connection error: {0}")]
-  LdapConnectionFailed(#[from] LdapError),
   #[error("unknown endpoint scheme: {0}")]
   UnknownEndpointScheme(String),
-  #[error("could not locate global catalog server")]
-  NoGlobalCatalogServer,
-  #[error("no rootdse (is this active directory???)")]
-  NoRootDSE,
-  #[error("could not locate ourselves in global catalog")]
-  NoMyself,
 
   #[error("client error: {0}")]
-  Client(#[from] ClientError)
+  Client(#[from] ClientError),
+
+  #[error("ldap error: {0}")]
+  Ldap(#[from] LdapError),
+
+  #[error("soap error: {0}")]
+  Soap(#[from] SoapError)
 }
 
 type Result<T> = std::result::Result<T, AdcsError>;
 
 pub struct CertificateServicesClient
 {
-  root_certificates: Vec<NamedCertificate>,
   implementation: Box<dyn CertificateClient>
 }
 
@@ -76,10 +73,9 @@ impl CertificateServicesClient
     let root_certificates = ldap.get_root_certificates()?;
     Ok(Self
     {
-      root_certificates,
       implementation: match endpoint.scheme().to_lowercase().as_str()
       {
-        "https" => Ok(Box::new(HttpCertificateClient::new(endpoint)) as Box<dyn CertificateClient>),
+        "https" => Ok(Box::new(HttpCertificateClient::new(endpoint, root_certificates)) as Box<dyn CertificateClient>),
         "ldap" => Ok(Box::new(LdapCertificateClient::new(ldap)?) as Box<dyn CertificateClient>),
         scheme => Err(AdcsError::UnknownEndpointScheme(scheme.to_owned()))
       }?

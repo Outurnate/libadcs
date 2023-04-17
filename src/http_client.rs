@@ -1,23 +1,30 @@
 use chrono::Local;
 use reqwest::Url;
 
-use crate::{soap::{SoapClient, HeaderBuilder}, soap_operations::xcep::{GetPoliciesRequest, GetPoliciesResponse, CertificateAuthorityEndpoints}, client::{CertificateClientImplementation, Policy, EnrollmentResponse}};
+use crate::{soap::{SoapClient, HeaderBuilder, SoapError}, soap_operations::xcep::{GetPoliciesRequest, GetPoliciesResponse, CertificateAuthorityEndpoints}, client::{CertificateClientImplementation, Policy, EnrollmentResponse, EnrollmentService}, NamedCertificate};
 
 pub struct HttpCertificateClient
 {
-  policies: GetPoliciesResponse
+  policy: Policy<CertificateAuthorityEndpoints>
 }
 
 impl CertificateClientImplementation for HttpCertificateClient
 {
   type Endpoint = CertificateAuthorityEndpoints;
+  type Error = SoapError;
+  type Response = ();
 
-  fn submit(&self, request: x509_certificate::rfc2986::CertificationRequest, template: &str) -> crate::Result<EnrollmentResponse>
+  fn get_policy(&self) -> &Policy<Self::Endpoint>
+  {
+    &self.policy
+  }
+
+  fn submit(&self, request: Vec<u8>, enrollment_service: &EnrollmentService<Self::Endpoint>) -> Result<Self::Response, Self::Error>
   {
     todo!()
   }
 
-  fn get_policy(&self) -> &Policy<Self::Endpoint>
+  fn decode_response(response: Self::Response) -> Result<EnrollmentResponse, crate::DecodeError>
   {
     todo!()
   }
@@ -25,14 +32,14 @@ impl CertificateClientImplementation for HttpCertificateClient
 
 impl HttpCertificateClient
 {
-  pub fn new(endpoint: Url) -> Self
+  pub fn new(endpoint: Url, root_certificates: Vec<NamedCertificate>) -> Self
   {
     let header = HeaderBuilder::default()
       .action(endpoint.to_string())
       .build().unwrap();
     let client = SoapClient::new();
-    let policies = client.invoke(&header, &GetPoliciesRequest::new(Local::now())).unwrap();
+    let response: GetPoliciesResponse = client.invoke(&header, &GetPoliciesRequest::new(Local::now())).unwrap();
 
-    Self { policies }
+    Self { policy: response.into_policy(root_certificates) }
   }
 }

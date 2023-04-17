@@ -1,5 +1,4 @@
-use libadcs::{CertificateServicesClient, AdcsError};
-use url::Url;
+use libadcs::{CertificateServicesClient, Url};
 use x509_certificate::rfc2986::CertificationRequest;
 use crate::{EnrollmentResponse, Error, RootCertificates, Environment};
 

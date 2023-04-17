@@ -1,16 +1,16 @@
 use xmltree::Element;
 use yaserde::{de, ser::{self, Serializer}};
 
-use super::Error;
+use super::SoapError;
 
 pub trait ElementExt
 {
-  fn deserialize<T: yaserde::YaDeserialize>(&self, error_mapper: impl FnOnce(String) -> Error) -> Result<T, Error>;
+  fn deserialize<T: yaserde::YaDeserialize>(&self, error_mapper: impl FnOnce(String) -> SoapError) -> Result<T, SoapError>;
 }
 
 impl ElementExt for Element
 {
-  fn deserialize<T: yaserde::YaDeserialize>(&self, error_mapper: impl FnOnce(String) -> Error) -> Result<T, Error>
+  fn deserialize<T: yaserde::YaDeserialize>(&self, error_mapper: impl FnOnce(String) -> SoapError) -> Result<T, SoapError>
   {
     let mut buffer = Vec::new();
     self.write(&mut buffer)?;

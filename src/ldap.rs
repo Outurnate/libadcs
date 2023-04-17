@@ -1,23 +1,39 @@
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt::{Display, Debug};
 
-use bcder::Oid;
 use itertools::Itertools;
 use ldap3::controls::RawControl;
 use ldap3::exop::{WhoAmI, WhoAmIResp};
-use ldap3::{Scope, SearchEntry, LdapError, LdapConn};
-use log::{log, Level};
+use ldap3::{Scope, SearchEntry, LdapConn};
+use thiserror::Error;
 use tokio::runtime::Runtime;
+use tracing::{event, Level, instrument};
 use trust_dns_resolver::ConnectionProvider;
 use trust_dns_resolver::error::ResolveError;
 use trust_dns_resolver::proto::DnsHandle;
 use crate::client::{EnrollmentService, CertificateTemplate};
-use crate::{NamedCertificate, AdcsError};
-use crate::cmc::rfc5272::AttributeValue;
+use crate::NamedCertificate;
 use crate::sddl::{SDDL, AUTO_ENROLL, ENROLL, SID};
 use x509_certificate::certificate::X509Certificate;
 use trust_dns_resolver::{AsyncResolver, name_server::{GenericConnection, GenericConnectionProvider}};
 use rand::prelude::*;
+
+
+#[derive(Error, Debug)]
+pub enum LdapError
+{
+  #[error("ldap connection error: {0}")]
+  LdapConnectionFailed(#[from] ldap3::LdapError),
+
+  #[error("could not locate global catalog server")]
+  NoGlobalCatalogServer,
+
+  #[error("no rootdse (is this active directory???)")]
+  NoRootDSE,
+
+  #[error("could not locate ourselves in global catalog")]
+  NoMyself
+}
 
 #[derive(Debug)]
 struct RootDSE
@@ -64,6 +80,7 @@ impl RootDSE
   }
 }
 
+#[instrument]
 fn myself(ldap: &mut LdapConn, rootdse: &RootDSE) -> Result<Option<LdapPrincipal>, LdapError>
 {
   let (rs, _) = ldap.extended(WhoAmI)?.success()?;
@@ -71,7 +88,7 @@ fn myself(ldap: &mut LdapConn, rootdse: &RootDSE) -> Result<Option<LdapPrincipal
   let netbios_name = rs.authzid.split(':').nth(1);
   let sam_account_name = netbios_name.and_then(|netbios_name| netbios_name.split('\\').nth(1));
 
-  //event!(Level::INFO, netbios_name = netbios_name, sam_account_name = sam_account_name);
+  event!(Level::INFO, netbios_name = netbios_name, sam_account_name = sam_account_name);
 
   if let (Some(netbios_name), Some(sam_account_name)) = (netbios_name, sam_account_name)
   {
@@ -84,6 +101,7 @@ fn myself(ldap: &mut LdapConn, rootdse: &RootDSE) -> Result<Option<LdapPrincipal
   }
 }
 
+#[instrument]
 fn is_member_of(ldap: &mut LdapConn, rootdse: &RootDSE, group: SID, member: SID) -> Result<bool, LdapError>
 {
   if let Some(group) = LdapPrincipal::from_query(ldap, &rootdse.root_domain_naming_context, Scope::Subtree, &group.to_ldap_predicate())?.first()
@@ -97,7 +115,8 @@ fn is_member_of(ldap: &mut LdapConn, rootdse: &RootDSE, group: SID, member: SID)
   }
 }
 
-fn try_global_catalog(scheme: impl Display, fqdn: &str, port: impl Display) -> Option<LdapConn>
+#[instrument]
+fn try_global_catalog(scheme: impl Display + Debug, fqdn: &str, port: impl Display + Debug) -> Option<LdapConn>
 {
   fn inner(scheme: impl Display, fqdn: &str, port: impl Display) -> Result<LdapConn, LdapError>
   {
@@ -110,7 +129,7 @@ fn try_global_catalog(scheme: impl Display, fqdn: &str, port: impl Display) -> O
     let mut ldap = LdapConn::new(&format!("{}://{}:{}", scheme, fqdn, port))?;
     ldap.sasl_gssapi_bind(fqdn)?;
     ldap.with_controls(vec![security_descriptor_flag_control]);
-    log!(Level::Info, "selected {} on port {}", fqdn, port);
+    event!(Level::INFO, "selected {} on port {}", fqdn, port);
     Ok(ldap)
   }
 
@@ -128,13 +147,14 @@ fn try_global_catalog(scheme: impl Display, fqdn: &str, port: impl Display) -> O
   match result
   {
     Ok(conn) => Some(conn),
-    Err(err) => { log!(Level::Warn, "error connecting to {} on port {} ({})", fqdn, port, err); None }
+    Err(err) => { event!(Level::WARN, "error connecting to {} on port {} ({})", fqdn, port, err); None }
   }
 }
 
-fn try_all_global_catalog<C: DnsHandle<Error = ResolveError>, P: ConnectionProvider<Conn = C>>(resolver: &AsyncResolver<C, P>, rt: &Runtime, scheme: impl Display, domain: &str) -> Option<LdapConn>
+#[instrument]
+fn try_all_global_catalog<C: DnsHandle<Error = ResolveError>, P: ConnectionProvider<Conn = C>>(resolver: &AsyncResolver<C, P>, rt: &Runtime, scheme: impl Display + Debug, domain: &str) -> Option<LdapConn>
 {
-  fn inner<C: DnsHandle<Error = ResolveError>, P: ConnectionProvider<Conn = C>>(resolver: &AsyncResolver<C, P>, rt: &Runtime, scheme: impl Display, domain: &str) -> Result<Option<LdapConn>, ResolveError>
+  fn inner<C: DnsHandle<Error = ResolveError>, P: ConnectionProvider<Conn = C>>(resolver: &AsyncResolver<C, P>, rt: &Runtime, scheme: impl Display + Debug, domain: &str) -> Result<Option<LdapConn>, ResolveError>
   {
     let result = rt.block_on(async { resolver.srv_lookup(format!("_{}._tcp.gc._msdcs.{}", scheme, domain)).await })?;
     let records = result.iter()
@@ -164,10 +184,11 @@ fn try_all_global_catalog<C: DnsHandle<Error = ResolveError>, P: ConnectionProvi
   match inner(resolver, rt, scheme, domain)
   {
     Ok(conn) => conn,
-    Err(err) => { log!(Level::Warn, "error resolving {}: {}", domain, err); None }
+    Err(err) => { event!(Level::WARN, "error resolving {}: {}", domain, err); None }
   }
 }
 
+#[instrument]
 fn try_all_ldap_servers(mut realm: String, tls: bool) -> Option<LdapConn>
 {
   let rt  = Runtime::new().expect("couldn't initialize tokio runtime");
@@ -202,17 +223,18 @@ pub struct LdapManager
 
 impl LdapManager
 {
-  pub fn new(realm: String, tls: bool) -> Result<Self, AdcsError>
+  #[instrument]
+  pub fn new(realm: String, tls: bool) -> Result<Self, LdapError>
   {
     if let Some(mut ldap) = try_all_ldap_servers(realm.clone(), tls)
     {
-      log!(Level::Info, "found ldap global catalog for realm {} (using tls: {})", realm, tls);
+      event!(Level::INFO, "found ldap global catalog for realm {} (using tls: {})", realm, tls);
       if let Some(rootdse) = RootDSE::new(&mut ldap)?
       {
-        log!(Level::Info, "found rootdse");
+        event!(Level::INFO, "found rootdse");
         if let Some(me) = myself(&mut ldap, &rootdse)?
         {
-          log!(Level::Info, "found myself in ldap");
+          event!(Level::INFO, "found myself in ldap");
           Ok(Self
             {
               ldap,
@@ -223,20 +245,21 @@ impl LdapManager
         }
         else
         {
-          Err(AdcsError::NoMyself)
+          Err(LdapError::NoMyself)
         }
       }
       else
       {
-        Err(AdcsError::NoRootDSE)
+        Err(LdapError::NoRootDSE)
       }
     }
     else
     {
-      Err(AdcsError::NoGlobalCatalogServer)
+      Err(LdapError::NoGlobalCatalogServer)
     }
   }
 
+  #[instrument(skip(self))]
   pub fn get_certificate_templates(&mut self) -> Result<Vec<CertificateTemplate>, LdapError>
   {
     let (results, _) = self.ldap.search(&self.rootdse.certificate_templates, Scope::OneLevel, "(objectClass=pKICertificateTemplate)", vec!["cn", "nTSecurityDescriptor"])?.success()?;
@@ -274,7 +297,7 @@ impl LdapManager
             Ok(sddl) => Some((
               sddl.dacl.as_ref().unwrap().has_object_permission(&ENROLL, &mut predicate).unwrap(),
               sddl.dacl.as_ref().unwrap().has_object_permission(&AUTO_ENROLL, &mut predicate).unwrap())),
-            Err(err) => { log!(Level::Warn, "invalid sddl: {}", err); None }
+            Err(err) => { event!(Level::WARN, "invalid sddl: {}", err); None }
           }
         }
         None => None,
@@ -289,6 +312,7 @@ impl LdapManager
     }).collect())
   }
 
+  #[instrument(skip(self))]
   pub fn get_root_certificates(&mut self) -> Result<Vec<NamedCertificate>, LdapError>
   {
     let (rs, _) = self.ldap.search(&self.rootdse.certification_authorities, Scope::OneLevel, "(objectClass=certificationAuthority)", vec!["cACertificate", "cn"])?.success()?;
@@ -301,13 +325,13 @@ impl LdapManager
         result.bin_attrs.get("cACertificate").and_then(|v| v.iter().next().and_then(|v| match X509Certificate::from_der(v)
         {
           Ok(certificate) => Some(certificate),
-          Err(err) => { log!(Level::Warn, "invalid root certificate: {}", err); None }
+          Err(err) => { event!(Level::WARN, "invalid root certificate: {}", err); None }
         }))
       )
       {
         (Some(cn), Some(certificate)) =>
         {
-          log!(Level::Info, "found root cert {}", cn);
+          event!(Level::INFO, "found root cert {}", cn);
           Some(NamedCertificate { nickname: cn.to_owned(), certificate })
         },
         _ => None
@@ -315,6 +339,7 @@ impl LdapManager
     }).collect::<Vec<_>>())
   }
 
+  #[instrument(skip(self))]
   pub fn get_enrollment_service(&mut self) -> Result<Vec<EnrollmentService<String>>, LdapError>
   {
     let (rs, _) = self.ldap.search(&self.rootdse.enrollment_services, Scope::OneLevel, "(objectClass=pKIEnrollmentService)", vec!["cn", "dNSHostName", "cACertificate", "certificateTemplates"])?.success()?;
@@ -328,14 +353,14 @@ impl LdapManager
         rs.bin_attrs.get("cACertificate").and_then(|v| v.first().and_then(|v| match X509Certificate::from_der(v)
         {
           Ok(certificate) => Some(certificate),
-          Err(err) => { log!(Level::Warn, "invalid enrollment service certificate: {}", err); None }
+          Err(err) => { event!(Level::WARN, "invalid enrollment service certificate: {}", err); None }
         })),
         rs.attrs.get("certificateTemplates").map(|v| v.to_vec())
       )
       {
         (Some(cn), Some(host_name), Some(certificate), Some(templates)) =>
         {
-          log!(Level::Info, "found enrollment service {}", cn);
+          event!(Level::INFO, "found enrollment service {}", cn);
           Some(EnrollmentService { endpoint: host_name, certificate: NamedCertificate { nickname: cn, certificate }, template_names: templates })
         },
         _ => None
@@ -344,6 +369,7 @@ impl LdapManager
   }
 }
 
+#[derive(Debug)]
 struct LdapPrincipal
 {
   object_sid: SID,
@@ -353,6 +379,7 @@ struct LdapPrincipal
 
 impl LdapPrincipal
 {
+  #[instrument]
   fn from_query(ldap: &mut LdapConn, base: &str, scope: Scope, filter: &str) -> Result<Vec<Self>, LdapError>
   {
     let (rs, _) = ldap.search(base, scope, filter, vec!["objectSid", "msDS-PrincipalName", "distinguishedName"])?.success()?;
@@ -365,7 +392,7 @@ impl LdapPrincipal
           v.first().and_then(|bytes| match SID::new(bytes)
           {
             Ok(sid) => Some(sid),
-            Err(err) => { log!(Level::Warn, "invalid sid: {}", err); None }
+            Err(err) => { event!(Level::WARN, "invalid sid: {}", err); None }
           })),
         rs.attrs.get("msDS-PrincipalName").and_then(|v| v.first().map(|v| v.to_owned())),
         rs.attrs.get("distinguishedName").and_then(|v| v.first().map(|v| v.to_owned())),

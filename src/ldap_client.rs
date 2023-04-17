@@ -1,8 +1,8 @@
 use libdcerpc::{ms_icpr::{CertPassage, DWFlags, CertificateServerResponse}, Protocol};
-use x509_certificate::{rfc2986::CertificationRequest, X509Certificate};
-use log::{log, Level};
+use tracing::{event, Level, instrument};
+use x509_certificate::X509Certificate;
 
-use crate::{ldap::{LdapManager}, AdcsError, cmc::CmcRequestBuilder, client::{EnrollmentService, CertificateTemplate, CertificateClientImplementation, Policy, EnrollmentResponse}};
+use crate::{ldap::{LdapManager, LdapError}, client::{EnrollmentService, CertificateTemplate, CertificateClientImplementation, Policy, EnrollmentResponse}};
 
 pub struct LdapCertificateClient
 {
@@ -13,56 +13,46 @@ pub struct LdapCertificateClient
 impl CertificateClientImplementation for LdapCertificateClient
 {
   type Endpoint = String;
+  type Response = CertificateServerResponse;
+  type Error = LdapError;
 
   fn get_policy(&self) -> &Policy<Self::Endpoint>
   {
     todo!()
   }
 
-  fn submit(&self, request: CertificationRequest, template_name: &str) -> Result<EnrollmentResponse, AdcsError>
+  #[instrument(skip(self))]
+  fn submit(&self, request: Vec<u8>, enrollment_service: &EnrollmentService<Self::Endpoint>) -> Result<Self::Response, Self::Error>
   {
-    if let Some(template) = self.templates.iter().find(|x| x.cn == template_name)
+    let endpoint = &enrollment_service.endpoint;
+    let spn = format!("host/{}", endpoint);
+    event!(Level::TRACE, "trying to connect to rpc endpoint {} with spn {}", endpoint, spn);
+    let mut client = CertPassage::new(Protocol::Tcp, endpoint, &spn).unwrap();
+    Ok(client.cert_server_request(DWFlags::REQUEST_TYPE_CMC | DWFlags::CMC_FULL_PKI_RESPONSE, &enrollment_service.certificate.nickname, None, "", request.as_slice()))
+  }
+
+  fn decode_response(response: Self::Response) -> Result<EnrollmentResponse, crate::DecodeError>
+  {
+    match response
     {
-      if let Some(enrollment_service) = self.enrollment_services.iter().skip(1).find(|x| x.has_template(template_name))
+      CertificateServerResponse
       {
-        let endpoint = &enrollment_service.endpoint;
-        let spn = format!("host/{}", endpoint);
-        log!(Level::Trace, "trying to connect to rpc endpoint {} with spn {}", endpoint, spn);
-        let mut client = CertPassage::new(Protocol::Tcp, endpoint, &spn).unwrap();
-        let request: Vec<u8> = CmcRequestBuilder::default()
-          .add_certificate(request, template.get_attributes())
-          .build()
-          .try_into()?;
-        match client.cert_server_request(DWFlags::REQUEST_TYPE_CMC | DWFlags::CMC_FULL_PKI_RESPONSE, &enrollment_service.certificate.nickname, None, "", request.as_slice())
-        {
-          CertificateServerResponse
-          {
-            disposition: Some(0x0000_0003), // issued
-            certificate_chain,
-            entity_certificate: Some(entity_certificate),
-            disposition_message, ..
-          } => Ok(EnrollmentResponse::Issued { entity: X509Certificate::from_der(entity_certificate)?, chain: vec![] }),
-          CertificateServerResponse
-          {
-            disposition: Some(0x0000_0005), // taken under submission
-            request_id: Some(request_id), ..
-          } => Ok(EnrollmentResponse::Pending(request_id)),
-          CertificateServerResponse
-          {
-            disposition: Some(disposition), // error
-            disposition_message, ..
-          } => Ok(EnrollmentResponse::Rejected(format!("rejected ({}): {}", disposition, disposition_message.unwrap_or_default()))),
-          _ => todo!()
-        }
-      }
-      else
+        disposition: Some(0x0000_0003), // issued
+        certificate_chain,
+        entity_certificate: Some(entity_certificate),
+        disposition_message, ..
+      } => Ok(EnrollmentResponse::Issued { entity: X509Certificate::from_der(entity_certificate)?, chain: vec![] }),
+      CertificateServerResponse
       {
-        Err(AdcsError::NoEnrollmentServiceFound(template_name.to_owned()))
-      }
-    }
-    else
-    {
-      Err(AdcsError::TemplateNotFound(template_name.to_owned()))
+        disposition: Some(0x0000_0005), // taken under submission
+        request_id: Some(request_id), ..
+      } => Ok(EnrollmentResponse::Pending(request_id)),
+      CertificateServerResponse
+      {
+        disposition: Some(disposition), // error
+        disposition_message, ..
+      } => Ok(EnrollmentResponse::Rejected(format!("rejected ({}): {}", disposition, disposition_message.unwrap_or_default()))),
+      _ => todo!()
     }
   }
 }

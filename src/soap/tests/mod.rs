@@ -1,5 +1,5 @@
 use yaserde_derive::{YaDeserialize, YaSerialize};
-use super::{SoapBody, Error};
+use super::{SoapBody, SoapError};
 
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
@@ -10,7 +10,7 @@ struct Dummy;
 fn fault()
 {
   let fault = include_str!("fault.xml");
-  if let Err(Error::Fault(fault)) = Dummy::from_soap(fault.as_bytes())
+  if let Err(SoapError::Fault(fault)) = Dummy::from_soap(fault.as_bytes())
   {
     assert_eq!(fault.to_string(), "fault env:Sender: Message does not have necessary info (node=None, role=Some(\"http://gizmos.com/order\"), detail=Some(Detail))".to_owned());
   }

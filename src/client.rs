@@ -2,7 +2,7 @@ use bcder::Oid;
 use thiserror::Error;
 use x509_certificate::{rfc2986::CertificationRequest, X509Certificate};
 
-use crate::{NamedCertificate, cmc::{rfc5272::AttributeValue, CmcResponse, CmcRequestBuilder}, EncodeError, DecodeError, AdcsError};
+use crate::{NamedCertificate, cmc::{rfc5272::AttributeValue, CmcRequestBuilder}, EncodeError, DecodeError, AdcsError};
 
 #[derive(Error, Debug)]
 pub enum ClientError
@@ -32,8 +32,11 @@ pub trait CertificateClientImplementation
 {
   type Endpoint;
   type Error;
+  type Response;
+
   fn get_policy(&self) -> &Policy<Self::Endpoint>;
-  fn submit(&self, request: Vec<u8>) -> Result<Vec<u8>, Self::Error>;
+  fn submit(&self, request: Vec<u8>, enrollment_service: &EnrollmentService<Self::Endpoint>) -> Result<Self::Response, Self::Error>;
+  fn decode_response(response: Self::Response) -> Result<EnrollmentResponse, DecodeError>;
 }
 
 impl<T: CertificateClientImplementation> CertificateClient for T where AdcsError: From<<T as CertificateClientImplementation>::Error>
@@ -63,8 +66,8 @@ impl<T: CertificateClientImplementation> CertificateClient for T where AdcsError
       if let Some(enrollment_service) = self.get_policy().enrollment_services.iter().find(|x| x.has_template(template_name))
       {
         let request = template.apply_to_request(request).map_err(ClientError::EncodeFault)?;
-        let response = CmcResponse::try_from(self.submit(request)?).map_err(DecodeError::BadCms).map_err(ClientError::DecodeFault)?;
-        Ok(())
+        let response = self.submit(request, enrollment_service)?;
+        Ok(T::decode_response(response).map_err(ClientError::DecodeFault)?)
       }
       else
       {
@@ -96,6 +99,7 @@ pub struct Policy<E>
   pub root_certificates: Vec<NamedCertificate>
 }
 
+#[derive(Debug)]
 pub struct EnrollmentService<E>
 {
   pub endpoint: E,

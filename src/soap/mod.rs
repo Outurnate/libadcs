@@ -18,7 +18,7 @@ pub use http::SoapClient;
 mod tests;
 
 #[derive(Error, Debug)]
-pub enum Error
+pub enum SoapError
 {
   #[error("invalid xml: {0}")]
   InvalidXml(#[from] ParseError),
@@ -44,41 +44,41 @@ pub enum Error
 
 pub trait SoapBody: yaserde::YaSerialize + yaserde::YaDeserialize + Default
 {
-  fn from_soap<R: Read>(reader: R) -> Result<(Option<Header>, Self), Error>;
-  fn clone_to_soap(&self, header: &Header) -> Result<String, Error>;
+  fn from_soap<R: Read>(reader: R) -> Result<(Option<Header>, Self), SoapError>;
+  fn clone_to_soap(&self, header: &Header) -> Result<String, SoapError>;
 }
 
 impl<T: yaserde::YaSerialize + yaserde::YaDeserialize + Default> SoapBody for T
 {
-  fn from_soap<R: Read>(reader: R) -> Result<(Option<Header>, Self), Error>
+  fn from_soap<R: Read>(reader: R) -> Result<(Option<Header>, Self), SoapError>
   {
     let tree = Element::parse(reader)?;
     let header = tree
       .get_child(("Header", "http://www.w3.org/2003/05/soap-envelope"))
-      .map(|header| header.deserialize(Error::InvalidHeader))
+      .map(|header| header.deserialize(SoapError::InvalidHeader))
       .transpose()?;
     if let Some(body) = tree.get_child(("Body", "http://www.w3.org/2003/05/soap-envelope"))
     {
       if let Some(fault) = body.get_child(("Fault", "http://www.w3.org/2003/05/soap-envelope"))
       {
-        Err(Error::Fault(Box::new(fault.deserialize(Error::InvalidBody)?)))
+        Err(SoapError::Fault(Box::new(fault.deserialize(SoapError::InvalidBody)?)))
       }
       else
       {
-        Ok((header, body.deserialize(Error::InvalidBody)?))
+        Ok((header, body.deserialize(SoapError::InvalidBody)?))
       }
     }
     else
     {
-      Err(Error::NoBody)
+      Err(SoapError::NoBody)
     }
   }
 
-  fn clone_to_soap(&self, header: &Header) -> Result<String, Error>
+  fn clone_to_soap(&self, header: &Header) -> Result<String, SoapError>
   {
     let config = ser::Config { perform_indent: false, write_document_declaration: false, indent_string: None };
-    let header = ser::to_string_with_config(header, &config).map_err(Error::InvalidHeader)?;
-    let body = to_string_with_config_and_start(self, &config, "soap:Body".to_owned()).map_err(Error::InvalidBody)?;
+    let header = ser::to_string_with_config(header, &config).map_err(SoapError::InvalidHeader)?;
+    let body = to_string_with_config_and_start(self, &config, "soap:Body".to_owned()).map_err(SoapError::InvalidBody)?;
     Ok(format!("<?xml version=\"1.0\" encoding=\"utf-8\"?><soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">{}{}</soap:Envelope>", header, body))
   }
 }

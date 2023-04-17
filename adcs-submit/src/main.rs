@@ -7,7 +7,9 @@ use libadcs::{NamedCertificate, AdcsError, EnrollmentResponse};
 use operations::Operations;
 use pem::PemError;
 use thiserror::Error;
-use x509_certificate::{rfc2986::CertificationRequest, CapturedX509Certificate};
+use tracing::subscriber::set_global_default;
+use tracing_log::LogTracer;
+use x509_certificate::{rfc2986::CertificationRequest};
 use clap::Parser;
 
 #[derive(Debug, Parser)]
@@ -51,7 +53,7 @@ impl From<AdcsError> for Error
   {
     match value
     {
-      AdcsError::LdapConnectionFailed(ldap) => Self::ConnectionError(ldap.to_string()),
+      //AdcsError::LdapConnectionFailed(ldap) => Self::ConnectionError(ldap.to_string()),
       _ => Self::MiscError(value.to_string())
     }
   }
@@ -146,7 +148,15 @@ fn certmonger_submit(env: Environment) -> Result<(i32, String), Error>
 fn main()
 {
   let env = Environment::parse();
-  simple_logger::init_with_level(env.verbose.log_level().unwrap_or(log::Level::Error)).unwrap();
+  LogTracer::init().unwrap();
+  let subscriber = tracing_subscriber::fmt()
+    .compact()
+    .with_file(true)
+    .with_line_number(true)
+    .with_writer(std::io::stderr)
+    .finish();
+  set_global_default(subscriber).unwrap();
+  //simple_logger::init_with_level(env.verbose.log_level().unwrap_or(log::Level::Error)).unwrap();
   let (code, out) = match certmonger_submit(env).map_err(|err| err.output())
   {
     Ok(x) => x,

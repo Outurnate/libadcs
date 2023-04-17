@@ -1,5 +1,5 @@
 use chrono::{DateTime, Local};
-use log::warn;
+use tracing::{event, Level, instrument};
 use x509_certificate::X509Certificate;
 use yaserde_derive::{YaDeserialize, YaSerialize};
 use base64::{Engine as _, engine::general_purpose};
@@ -82,7 +82,8 @@ pub struct GetPoliciesResponse
 
 impl GetPoliciesResponse
 {
-  fn into_policy(self, root_certificates: Vec<NamedCertificate>) -> Policy<CertificateAuthorityEndpoints>
+  #[instrument]
+  pub fn into_policy(self, root_certificates: Vec<NamedCertificate>) -> Policy<CertificateAuthorityEndpoints>
   {
     let templates: Vec<_> = self.response.templates.templates
       .into_iter()
@@ -114,7 +115,7 @@ impl GetPoliciesResponse
             .map(|template| template.1.cn.to_string()).collect()
         })
       })
-      .filter_map(|r| r.map_err(|e: DecodeError| warn!("invalid enrollment service: {}", e)).ok())
+      .filter_map(|r| r.map_err(|e: DecodeError| event!(Level::WARN, "invalid enrollment service: {}", e)).ok())
       .collect();
     Policy
     {
