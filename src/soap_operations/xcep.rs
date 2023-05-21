@@ -2,7 +2,7 @@ use std::convert::Infallible;
 
 use base64::{engine::general_purpose, Engine};
 use bcder::{decode::DecodeError, Oid};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, SecondsFormat};
 use itertools::Itertools;
 use tracing::{event, Level, instrument};
 use x509_certificate::X509Certificate;
@@ -22,8 +22,8 @@ struct Client
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
-#[yaserde(prefix = "soap", namespace = "soap: http://www.w3.org/2003/05/soap-envelope")]
-pub struct GetPoliciesRequest
+#[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
+pub struct GetPoliciesRequestInner
 {
   #[yaserde(rename = "client", prefix = "xcep")]
   client: Option<Client>,
@@ -32,7 +32,15 @@ pub struct GetPoliciesRequest
   request_filter: Option<RequestFilter>
 }
 
-impl GetPoliciesRequest
+#[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
+#[yaserde(prefix = "soap", namespace = "soap: http://www.w3.org/2003/05/soap-envelope")]
+pub struct GetPoliciesRequest
+{
+  #[yaserde(rename = "GetPolicies", prefix = "xcep")]
+  inner: GetPoliciesRequestInner
+}
+
+impl GetPoliciesRequestInner
 {
   pub fn new(last_update: DateTime<Local>) -> Self
   {
@@ -40,10 +48,21 @@ impl GetPoliciesRequest
     {
       client: Some(Client
       {
-        last_update: Some(last_update.format("%+").to_string()),
+        last_update: Some(last_update.to_rfc3339_opts(SecondsFormat::Millis, true)),
         ..Default::default()
       }),
       request_filter: None
+    }
+  }
+}
+
+impl GetPoliciesRequest
+{
+  pub fn new(last_update: DateTime<Local>) -> Self
+  {
+    Self
+    {
+      inner: GetPoliciesRequestInner::new(last_update)
     }
   }
 }
@@ -80,9 +99,9 @@ pub struct GetPoliciesResponse
 
 impl GetPoliciesResponse
 {
-  pub fn into_policy(self, root_certificates: Vec<NamedCertificate>) -> Policy<CertificateAuthorityEndpoints>
+  pub fn into_policy(self) -> Policy<CertificateAuthorityEndpoints>
   {
-    self.response.into_policy(root_certificates)
+    self.response.into_policy()
   }
 }
 
@@ -103,7 +122,7 @@ pub struct GetPoliciesResponseInner
 impl GetPoliciesResponseInner
 {
   #[instrument(skip_all)]
-  pub fn into_policy(self, root_certificates: Vec<NamedCertificate>) -> Policy<CertificateAuthorityEndpoints>
+  pub fn into_policy(self) -> Policy<CertificateAuthorityEndpoints>
   {
     let templates: Vec<_> = self.response.templates.templates
       .into_iter()
@@ -160,8 +179,7 @@ impl GetPoliciesResponseInner
     Policy
     {
       enrollment_services,
-      templates: templates.into_iter().map(|template| template.1).collect(),
-      root_certificates
+      templates: templates.into_iter().map(|template| template.1).collect()
     }
   }
 }

@@ -3,6 +3,7 @@ use reqwest::Url;
 use url::ParseError;
 use yaserde_derive::{YaDeserialize, YaSerialize};
 use std::fmt::{Display, Formatter};
+use super::SoapError;
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "soap", namespace = "soap: http://www.w3.org/2003/05/soap-envelope")]
@@ -98,7 +99,7 @@ struct Detail
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize, Builder)]
 #[yaserde(prefix = "soap", namespace = "soap: http://www.w3.org/2003/05/soap-envelope", namespace = "wsa: http://www.w3.org/2005/08/addressing")]
-#[builder(setter(into), default)]
+#[builder(setter(into), default, build_fn(error = "SoapError"))]
 pub struct Header
 {
   #[yaserde(rename = "ReplyTo", prefix = "wsa")]
@@ -148,7 +149,12 @@ impl Header
 {
   pub fn get_action(&self) -> Result<Url, ParseError>
   {
-    Url::parse(&self.action.as_str())
+    Url::parse(self.action.as_str())
+  }
+
+  pub fn get_to(&self) -> Result<Option<Url>, ParseError>
+  {
+    self.to.as_ref().map(|x| Url::parse(x)).transpose()
   }
 }
 

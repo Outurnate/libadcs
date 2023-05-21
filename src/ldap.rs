@@ -367,6 +367,11 @@ impl LdapManager
       }
     }).collect())
   }
+
+  pub fn get_ca_certificates(&mut self) -> Result<Vec<NamedCertificate>, LdapError>
+  {
+    Ok(self.get_enrollment_service()?.into_iter().map(|enrollment_service| enrollment_service.certificate).collect())
+  }
 }
 
 #[derive(Debug)]

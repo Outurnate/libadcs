@@ -15,7 +15,7 @@ pub use reqwest::Url;
 pub use client::EnrollmentResponse;
 
 use client::{CertificateClient, ClientError};
-use soap::SoapError;
+use soap::{SoapError, SoapHttpError};
 use std::fmt::Display;
 use http_client::HttpCertificateClient;
 use ldap::{LdapManager, LdapError};
@@ -55,14 +55,16 @@ pub enum AdcsError
   Ldap(#[from] LdapError),
 
   #[error("soap error: {0}")]
-  Soap(#[from] SoapError)
+  Soap(#[from] SoapHttpError)
 }
 
 type Result<T> = std::result::Result<T, AdcsError>;
 
 pub struct CertificateServicesClient
 {
-  implementation: Box<dyn CertificateClient>
+  implementation: Box<dyn CertificateClient>,
+  root_certificates: Vec<NamedCertificate>,
+  chain_certificates: Vec<NamedCertificate>
 }
 
 impl CertificateServicesClient
@@ -71,28 +73,34 @@ impl CertificateServicesClient
   {
     let mut ldap = LdapManager::new(forest, tls)?;
     let root_certificates = ldap.get_root_certificates()?;
+    let chain_certificates = ldap.get_ca_certificates()?
+      .into_iter()
+      .filter(|ca| !root_certificates.contains(ca))
+      .collect();
     Ok(Self
     {
       implementation: match endpoint.scheme().to_lowercase().as_str()
       {
-        "https" => Ok(Box::new(HttpCertificateClient::new(endpoint, root_certificates)) as Box<dyn CertificateClient>),
+        "https" => Ok(Box::new(HttpCertificateClient::new(endpoint)) as Box<dyn CertificateClient>),
         "ldap" => Ok(Box::new(LdapCertificateClient::new(ldap)?) as Box<dyn CertificateClient>),
         scheme => Err(AdcsError::UnknownEndpointScheme(scheme.to_owned()))
-      }?
+      }?,
+      root_certificates,
+      chain_certificates
     })
   }
 
   pub fn root_certificates(&self) -> &Vec<NamedCertificate>
   {
-    self.implementation.root_certificates()
+    &self.root_certificates
   }
 
-  pub fn chain_certificates(&self) -> Vec<&'_ NamedCertificate>
+  pub fn chain_certificates(&self) -> &Vec<NamedCertificate>
   {
-    self.implementation.chain_certificates()
+    &self.chain_certificates
   }
 
-  pub fn template_names(&self) -> Vec<&'_ str>
+  pub fn template_names(&self) -> Result<Vec<String>>
   {
     self.implementation.templates()
   }

@@ -45,7 +45,7 @@ impl Operations
       {
         vec![]
       },
-      chain_certificates: chain.into_iter().cloned().collect()
+      chain_certificates: chain.to_vec()
     })
   }
 
@@ -56,6 +56,6 @@ impl Operations
 
   pub fn supported_templates(self) -> Result<Vec<String>, Error>
   {
-    Ok(self.client.template_names().into_iter().map(|template| template.to_string()).collect())
+    Ok(self.client.template_names()?)
   }
 }

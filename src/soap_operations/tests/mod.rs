@@ -48,7 +48,7 @@ fn parse_known_xcep_response()
   let known = include_str!("xcep_response.xml");
   let (header, response) = GetPoliciesResponse::from_soap(known.as_bytes()).expect("failed to parse known good xcep message");
   let xml = response.clone_to_soap(&header.expect("no header")).expect("failed to serialize known good message");
-  let policy = response.into_policy(vec![]);
+  let policy = response.into_policy();
   println!("{}", xml);
   assert_eq!(policy.templates.len(), 1);
 }

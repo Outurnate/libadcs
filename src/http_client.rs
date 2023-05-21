@@ -1,22 +1,28 @@
-use chrono::Local;
+use chrono::{Local, Months};
 use reqwest::Url;
 
-use crate::{soap::{SoapClient, HeaderBuilder, SoapError}, soap_operations::xcep::{GetPoliciesRequest, GetPoliciesResponse, CertificateAuthorityEndpoints}, client::{CertificateClientImplementation, Policy, EnrollmentResponse, EnrollmentService}, NamedCertificate};
+use crate::{soap::{SoapClient, HeaderBuilder, SoapError, SoapHttpError}, soap_operations::xcep::{GetPoliciesRequest, GetPoliciesResponse, CertificateAuthorityEndpoints}, client::{CertificateClientImplementation, Policy, EnrollmentResponse, EnrollmentService}, NamedCertificate};
 
 pub struct HttpCertificateClient
 {
-  policy: Policy<CertificateAuthorityEndpoints>
+  endpoint: Url
 }
 
 impl CertificateClientImplementation for HttpCertificateClient
 {
   type Endpoint = CertificateAuthorityEndpoints;
-  type Error = SoapError;
+  type Error = SoapHttpError;
   type Response = ();
 
-  fn get_policy(&self) -> &Policy<Self::Endpoint>
+  fn get_policy(&self) -> Result<Policy<Self::Endpoint>, Self::Error>
   {
-    &self.policy
+    let header = HeaderBuilder::default()
+      .to(self.endpoint.to_string())
+      .action("http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy/IPolicy/GetPolicies")
+      .build()?;
+    let client = SoapClient::new();
+    let response: GetPoliciesResponse = client.invoke(&header, &GetPoliciesRequest::new(Local::now().checked_sub_months(Months::new(24)).unwrap()))?;
+    Ok(response.into_policy())
   }
 
   fn submit(&self, request: Vec<u8>, enrollment_service: &EnrollmentService<Self::Endpoint>) -> Result<Self::Response, Self::Error>
@@ -32,14 +38,11 @@ impl CertificateClientImplementation for HttpCertificateClient
 
 impl HttpCertificateClient
 {
-  pub fn new(endpoint: Url, root_certificates: Vec<NamedCertificate>) -> Self
+  pub fn new(endpoint: Url) -> Self
   {
-    let header = HeaderBuilder::default()
-      .action(endpoint.to_string())
-      .build().unwrap();
-    let client = SoapClient::new();
-    let response: GetPoliciesResponse = client.invoke(&header, &GetPoliciesRequest::new(Local::now())).unwrap();
-
-    Self { policy: response.into_policy(root_certificates) }
+    Self
+    {
+      endpoint
+    }
   }
 }

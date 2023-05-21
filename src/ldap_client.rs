@@ -16,7 +16,7 @@ impl CertificateClientImplementation for LdapCertificateClient
   type Response = CertificateServerResponse;
   type Error = LdapError;
 
-  fn get_policy(&self) -> &Policy<Self::Endpoint>
+  fn get_policy(&self) -> Result<Policy<Self::Endpoint>, Self::Error>
   {
     todo!()
   }

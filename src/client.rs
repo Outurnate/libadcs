@@ -1,5 +1,8 @@
+use std::fmt::Display;
+
 use bcder::Oid;
 use thiserror::Error;
+use tracing::{event, Level, instrument};
 use x509_certificate::{rfc2986::CertificationRequest, X509Certificate};
 
 use crate::{NamedCertificate, cmc::{rfc5272::AttributeValue, CmcRequestBuilder}, EncodeError, DecodeError, AdcsError};
@@ -22,48 +25,34 @@ pub enum ClientError
 
 pub trait CertificateClient
 {
-  fn chain_certificates(&self) -> Vec<&'_ NamedCertificate>;
-  fn templates(&self) -> Vec<&'_ str>;
-  fn root_certificates(&self) -> &Vec<NamedCertificate>;
+  fn templates(&self) -> Result<Vec<String>, AdcsError>;
   fn submit(&self, request: CertificationRequest, template: &str) -> Result<EnrollmentResponse, AdcsError>;
 }
 
 pub trait CertificateClientImplementation
 {
   type Endpoint;
-  type Error;
+  type Error: std::fmt::Display;
   type Response;
 
-  fn get_policy(&self) -> &Policy<Self::Endpoint>;
+  fn get_policy(&self) -> Result<Policy<Self::Endpoint>, Self::Error>;
   fn submit(&self, request: Vec<u8>, enrollment_service: &EnrollmentService<Self::Endpoint>) -> Result<Self::Response, Self::Error>;
   fn decode_response(response: Self::Response) -> Result<EnrollmentResponse, DecodeError>;
 }
 
 impl<T: CertificateClientImplementation> CertificateClient for T where AdcsError: From<<T as CertificateClientImplementation>::Error>
 {
-  fn chain_certificates(&self) -> Vec<&'_ NamedCertificate>
+  fn templates(&self) -> Result<Vec<String>, AdcsError>
   {
-    self.get_policy().enrollment_services
-      .iter()
-      .map(|service| &service.certificate)
-      .collect()
-  }
-
-  fn templates(&self) -> Vec<&'_ str>
-  {
-    self.get_policy().templates.iter().map(|template| template.cn.as_str()).collect()
-  }
-
-  fn root_certificates(&self) -> &Vec<NamedCertificate>
-  {
-    &self.get_policy().root_certificates
+    Ok(self.get_policy()?.templates.into_iter().map(|template| template.cn).collect())
   }
 
   fn submit(&self, request: CertificationRequest, template_name: &str) -> Result<EnrollmentResponse, AdcsError>
   {
-    if let Some(template) = self.get_policy().templates.iter().find(|x| x.cn == template_name)
+    let policy = self.get_policy()?;
+    if let Some(template) = policy.templates.iter().find(|x| x.cn == template_name)
     {
-      if let Some(enrollment_service) = self.get_policy().enrollment_services.iter().find(|x| x.has_template(template_name))
+      if let Some(enrollment_service) = policy.enrollment_services.iter().find(|x| x.has_template(template_name))
       {
         let request = template.apply_to_request(request).map_err(ClientError::EncodeFault)?;
         let response = self.submit(request, enrollment_service)?;
@@ -95,8 +84,7 @@ pub enum EnrollmentResponse
 pub struct Policy<E>
 {
   pub enrollment_services: Vec<EnrollmentService<E>>,
-  pub templates: Vec<CertificateTemplate>,
-  pub root_certificates: Vec<NamedCertificate>
+  pub templates: Vec<CertificateTemplate>
 }
 
 #[derive(Debug)]
