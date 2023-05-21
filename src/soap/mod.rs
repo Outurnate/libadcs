@@ -42,13 +42,13 @@ pub enum SoapError
   Fault(Box<Fault>)
 }
 
-pub trait SoapBody: yaserde::YaSerialize + yaserde::YaDeserialize + Default
+pub trait SoapBody: yaserde::YaSerialize + yaserde::YaDeserialize + Default + std::fmt::Debug
 {
   fn from_soap<R: Read>(reader: R) -> Result<(Option<Header>, Self), SoapError>;
   fn clone_to_soap(&self, header: &Header) -> Result<String, SoapError>;
 }
 
-impl<T: yaserde::YaSerialize + yaserde::YaDeserialize + Default> SoapBody for T
+impl<T: yaserde::YaSerialize + yaserde::YaDeserialize + Default + std::fmt::Debug> SoapBody for T
 {
   fn from_soap<R: Read>(reader: R) -> Result<(Option<Header>, Self), SoapError>
   {

@@ -117,7 +117,7 @@ pub struct Header
   to: Option<String>,
   
   #[yaserde(rename = "Action", prefix = "wsa")]
-  action: Option<String>,
+  action: String,
   
   #[yaserde(rename = "ProblemIRI", prefix = "wsa")]
   problem_iri: Option<String>,
@@ -146,9 +146,9 @@ pub struct Header
 
 impl Header
 {
-  pub fn get_action(&self) -> Option<Result<Url, ParseError>>
+  pub fn get_action(&self) -> Result<Url, ParseError>
   {
-    self.action.as_ref().map(|url| Url::parse(url.as_str()))
+    Url::parse(&self.action.as_str())
   }
 }
 

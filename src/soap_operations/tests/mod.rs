@@ -6,6 +6,7 @@ use crate::soap::EndpointReferenceBuilder;
 use crate::soap_operations::wstrust::RequestSecurityToken;
 use super::xcep::GetPoliciesRequest;
 use super::xcep::GetPoliciesResponse;
+use test_log::test;
 
 #[test]
 fn round_trip()
@@ -45,5 +46,9 @@ fn parse_known_xcep_request()
 fn parse_known_xcep_response()
 {
   let known = include_str!("xcep_response.xml");
-  GetPoliciesResponse::from_soap(known.as_bytes()).expect("failed to parse known good xcep message");
+  let (header, response) = GetPoliciesResponse::from_soap(known.as_bytes()).expect("failed to parse known good xcep message");
+  let xml = response.clone_to_soap(&header.expect("no header")).expect("failed to serialize known good message");
+  let policy = response.into_policy(vec![]);
+  println!("{}", xml);
+  assert_eq!(policy.templates.len(), 1);
 }

@@ -42,20 +42,14 @@ pub enum Error
   #[error("bad pem encoding: {0}")]
   BadPemEncoding(#[from] PemError),
   #[error("bad pem contents: {0}")]
-  BadPemData(#[from] DecodeError<<BytesSource as Source>::Error>),
-  #[error("{0}")]
-  MiscError(String)
+  BadPemData(#[from] DecodeError<<BytesSource as Source>::Error>)
 }
 
 impl From<AdcsError> for Error
 {
   fn from(value: AdcsError) -> Self
   {
-    match value
-    {
-      //AdcsError::LdapConnectionFailed(ldap) => Self::ConnectionError(ldap.to_string()),
-      _ => Self::MiscError(value.to_string())
-    }
+    Self::ConnectionError(value.to_string())
   }
 }
 
@@ -154,9 +148,17 @@ fn main()
     .with_file(true)
     .with_line_number(true)
     .with_writer(std::io::stderr)
+    .with_max_level(match env.verbose.log_level()
+    {
+      Some(clap_verbosity_flag::Level::Debug) => tracing::Level::DEBUG,
+      Some(clap_verbosity_flag::Level::Error) => tracing::Level::ERROR,
+      Some(clap_verbosity_flag::Level::Info)  => tracing::Level::INFO,
+      Some(clap_verbosity_flag::Level::Trace) => tracing::Level::TRACE,
+      Some(clap_verbosity_flag::Level::Warn)  => tracing::Level::WARN,
+      None => tracing::Level::ERROR
+    })
     .finish();
   set_global_default(subscriber).unwrap();
-  //simple_logger::init_with_level(env.verbose.log_level().unwrap_or(log::Level::Error)).unwrap();
   let (code, out) = match certmonger_submit(env).map_err(|err| err.output())
   {
     Ok(x) => x,

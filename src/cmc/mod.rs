@@ -9,6 +9,7 @@ use cryptographic_message_syntax::{SignedDataBuilder, Oid, Bytes, SignerBuilder,
 use signature::Error;
 use x509_certificate::{rfc2986::CertificationRequest, KeyAlgorithm, KeyInfoSigner, Signature, Signer, Sign, SignatureAlgorithm, X509CertificateError, DigestAlgorithm, rfc3280::Name, X509Certificate};
 use self::rfc5272::{AttributeValue, PKIData, TaggedAttribute, TaggedRequest, TaggedCertificationRequest};
+use std::str::FromStr;
 
 struct AttributedCertificationRequest
 {
@@ -27,9 +28,9 @@ pub struct CmcRequestBuilder(CmcRequest);
 
 impl CmcRequestBuilder
 {
-  pub fn add_certificate(mut self, request: CertificationRequest, attributes: impl Iterator<Item = (Oid, Vec<AttributeValue>)>) -> Self
+  pub fn add_certificate(mut self, request: CertificationRequest, attributes: Vec<(Oid, Vec<AttributeValue>)>) -> Self
   {
-    self.0.certificate_requests.push(AttributedCertificationRequest { request, attributes: attributes.collect() });
+    self.0.certificate_requests.push(AttributedCertificationRequest { request, attributes });
     self
   }
 
@@ -163,17 +164,6 @@ impl<'a> SignedDataExt<'a> for SignedData
   }
 }
 
-/*impl CmcMessage
-{
-
-  pub fn decode(&self) -> Result<Vec<X509Certificate>, DecodeError<Infallible>>
-  {
-    let signed_data = Constructed::decode(self.0.as_slice(), Mode::Der, |cons| rfc5652::SignedData::decode(cons))?;
-    let response = PKIResponse::decode_der(signed_data.content_info.content.unwrap())?;
-    Ok(vec![]) // TODO
-  }
-}*/
-
 struct NullKeyInfoSigner
 {
   digest_algorithm: DigestAlgorithm
@@ -229,5 +219,70 @@ impl Sign for NullKeyInfoSigner
   fn rsa_primes(&self) -> Result<Option<(Vec<u8>, Vec<u8>)>, X509CertificateError>
   {
     unimplemented!()
+  }
+}
+
+pub trait OidExt
+{
+  fn parse(value: &str) -> Result<Oid, &'static str>;
+}
+
+fn from_str(s: &str) -> Result<u32, &'static str>
+{
+  u32::from_str(s).map_err(|_| "only integer components allowed")
+}
+
+impl OidExt for Oid
+{
+  fn parse(value: &str) -> Result<Oid, &'static str>
+  {
+    let mut components = value.split('.');
+    let (first, second) = match (components.next(), components.next())
+    {
+      (Some(first), Some(second)) => (first, second),
+      _ => { return Err("at least two components required"); }
+    };
+
+    let first = from_str(first)?;
+    if first > 2
+    {
+      return Err("first component can only be 0, 1, or 2.")
+    }
+
+    let second = from_str(second)?;
+    if first < 2 && second >= 40
+    {
+      return Err("second component for 0. and 1. must be less than 40");
+    }
+
+    let mut res = vec![40 * first + second];
+    for item in components
+    {
+      res.push(from_str(item)?);
+    }
+
+    let mut bytes = vec![];
+    for item in res
+    {
+      if item > 0x0FFF_FFFF
+      {
+        bytes.push(((item >> 28) | 0x80) as u8);
+      }
+      if item > 0x001F_FFFF
+      {
+        bytes.push((((item >> 21) & 0x7F) | 0x80) as u8);
+      }
+      if item > 0x0000_3FFF
+      {
+        bytes.push((((item >> 14) & 0x7F) | 0x80) as u8)
+      }
+      if item > 0x0000_007F
+      {
+        bytes.push((((item >> 7) & 0x7F) | 0x80) as u8);
+      }
+      bytes.push((item & 0x7F) as u8);
+    }
+
+    Ok(Oid(bytes.into()))
   }
 }

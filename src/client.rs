@@ -119,7 +119,8 @@ pub struct CertificateTemplate
 {
   pub cn: String,
   pub enroll: bool,
-  pub auto_enroll: bool
+  pub auto_enroll: bool,
+  pub extensions: Vec<(Oid, Vec<AttributeValue>)>
 }
 
 impl CertificateTemplate
@@ -127,14 +128,9 @@ impl CertificateTemplate
   pub fn apply_to_request(&self, request: CertificationRequest) -> Result<Vec<u8>, EncodeError>
   {
     let request: Vec<u8> = CmcRequestBuilder::default()
-      .add_certificate(request, self.get_attributes())
+      .add_certificate(request, self.extensions.clone())
       .build()
       .try_into()?;
     todo!()
-  }
-
-  pub fn get_attributes(&self) -> impl Iterator<Item = (Oid, Vec<AttributeValue>)>
-  {
-    vec![].into_iter() // TODO
   }
 }

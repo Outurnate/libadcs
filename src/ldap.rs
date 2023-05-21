@@ -306,7 +306,7 @@ impl LdapManager
 
       match (cn, permissions)
       {
-        (Some(cn), Some((enroll, auto_enroll))) => Some(CertificateTemplate { cn, enroll, auto_enroll }),
+        (Some(cn), Some((enroll, auto_enroll))) => Some(CertificateTemplate { cn, enroll, auto_enroll, extensions: vec![] }),
         _ => None
       }
     }).collect())

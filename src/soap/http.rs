@@ -13,16 +13,22 @@ pub enum Error
 {
   #[error("http request error: {0}")]
   HttpTransport(#[from] reqwest::Error),
+
   #[error("invalid http response: {0}")]
   InvalidHttpResponse(StatusCode),
+
   #[error("header decode error: {0}")]
   InvalidBase64(#[from] base64::DecodeError),
+
   #[error("gssapi error: {0}")]
   Gssapi(#[from] anyhow::Error),
+
   #[error("http response didn't contain www-authenticate header")]
   NoAuthenticateHeader,
+
   #[error("soap protocol fault: {0}")]
   SoapTransport(#[from] super::SoapError),
+
   #[error("soap action is not a valid url: {0}")]
   SoapActionParse(#[from] ParseError)
 }
@@ -39,11 +45,11 @@ impl SoapClient
     Self { http_client: Client::new() }
   }
 
+  #[instrument(skip(self, header), err, ret)]
   pub fn invoke<S: SoapBody, R: SoapBody>(&self, header: &Header, body: &S) -> Result<R, Error>
   {
-    let action = header.get_action().unwrap()?;
-    let spn = format!("HTTP/{}", action.host_str().unwrap());
-    let mut request = SoapClientRequest::new(&self.http_client, &spn)?;
+    let action = header.get_action()?;
+    let mut request = SoapClientRequest::new(&self.http_client, &format!("HTTP/{}", action.host_str().unwrap_or_default()))?;
     let body = body.clone_to_soap(header)?;
     let response = loop
     {
@@ -77,7 +83,7 @@ impl<'a> SoapClientRequest<'a>
     })
   }
 
-  #[instrument(skip(self, token))]
+  #[instrument(skip(self, token), err)]
   fn post(&self, endpoint: impl IntoUrl + std::fmt::Debug, body: impl Into<Body> + std::fmt::Debug, token: &[u8]) -> Result<(Vec<u8>, StatusCode, Bytes), Error>
   {
     event!(Level::TRACE, "posting to endpoint");
@@ -104,7 +110,7 @@ impl<'a> SoapClientRequest<'a>
     }
   }
 
-  #[instrument(skip(self))]
+  #[instrument(skip(self), err)]
   fn step(&mut self, endpoint: impl IntoUrl + std::fmt::Debug, body: impl Into<Body> + std::fmt::Debug) -> Result<Option<Bytes>, Error>
   {
     let (received_token, status, body) = self.post(endpoint, body, &self.token)?;
@@ -112,6 +118,7 @@ impl<'a> SoapClientRequest<'a>
     {
       StatusCode::ACCEPTED =>
       {
+        event!(Level::TRACE, "Server accepted GSSAPI token");
         Ok(Some(body))
       },
       StatusCode::UNAUTHORIZED => if let Some(kerberos_client) = self.kerberos_client.take()
@@ -120,6 +127,7 @@ impl<'a> SoapClientRequest<'a>
         {
           Step::Continue((kerberos_client, token)) =>
           {
+            event!(Level::TRACE, "Server responded with token requiring another step");
             self.kerberos_client = Some(kerberos_client);
             self.token = token.to_owned();
             Ok(None)
@@ -128,12 +136,14 @@ impl<'a> SoapClientRequest<'a>
           {
             if let Some(token) = token
             {
+              event!(Level::TRACE, "GSSAPI client reported finished, next request must be accepted");
               self.kerberos_client = None;
               self.token = token.to_owned();
               Ok(None)
             }
             else
             {
+              event!(Level::TRACE, "GSSAPI finished without token");
               Ok(Some(body))
             }
           }
@@ -141,6 +151,7 @@ impl<'a> SoapClientRequest<'a>
       }
       else
       {
+        event!(Level::TRACE, "Server replied unauthorized, but GSSAPI doesn't have another step");
         Ok(None)
       },
       status => Err(Error::InvalidHttpResponse(status))

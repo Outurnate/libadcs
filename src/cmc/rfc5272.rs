@@ -1,6 +1,6 @@
-use std::{ops::{DerefMut, Deref}, io::Write};
+use std::{ops::{DerefMut, Deref}, io::Write, convert::Infallible};
 use auto_enums::auto_enum;
-use bcder::{Captured, encode::{self, PrimitiveContent}, decode::{Source, Constructed, DecodeError, IntoSource}, Tag, Mode, Integer};
+use bcder::{Captured, encode::{self, PrimitiveContent}, decode::{Source, Constructed, DecodeError, IntoSource, Pos}, Tag, Mode, Integer};
 use bcder_derive::Values;
 use cryptographic_message_syntax::{Oid, asn1::rfc5652::ContentInfo};
 use x509_certificate::rfc2986::CertificationRequest;
@@ -14,6 +14,11 @@ macro_rules! AnyType
 
     impl $name
     {
+      pub fn new(value: bytes::Bytes, mode: Mode) -> Result<Self, DecodeError<Infallible>>
+      {
+        Ok(Self(Captured::new(value, mode, Pos::default())))
+      }
+
       pub fn from_constructed<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
       {
         cons.take_constructed(|_, cons| Ok(Self(cons.capture_all()?)))
@@ -70,6 +75,14 @@ macro_rules! AnyType
     }
 
     impl Eq for $name {}
+
+    impl Default for $name
+    {
+      fn default() -> Self
+      {
+        Self(Captured::empty(Mode::Der))
+      }
+    }
   };
 }
 
@@ -128,6 +141,14 @@ AnyType!(AttributeValue);
 AnyType!(CertificateRequestMessage);
 AnyType!(RequestMessage);
 AnyType!(OtherMessageValue);
+
+impl AttributeValue
+{
+  pub fn decode_primitive(value: bytes::Bytes, mode: Mode) -> Result<Self, DecodeError<Infallible>>
+  {
+    Ok(Self(Constructed::decode(value, mode, |cons| cons.capture_all())?))
+  }
+}
 
 #[derive(Clone)]
 pub struct PKIData

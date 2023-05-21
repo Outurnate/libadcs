@@ -14,7 +14,7 @@ fn request_encode()
   let csr = builder.create_certificate_signing_request(&InMemorySigningKeyPair::generate_random(KeyAlgorithm::Ed25519).expect("failed to generate new key pair").0).expect("failed to generate csr");
 
   let request = CmcRequestBuilder::default()
-    .add_certificate(csr, vec![].into_iter())
+    .add_certificate(csr, vec![])
     .build();
   println!("{}", general_purpose::STANDARD.encode::<Vec<u8>>(request.try_into().expect("failed to build cms message")));
 }

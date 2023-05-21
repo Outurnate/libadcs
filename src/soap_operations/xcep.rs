@@ -1,10 +1,14 @@
+use std::convert::Infallible;
+
+use base64::{engine::general_purpose, Engine};
+use bcder::{decode::DecodeError, Oid};
 use chrono::{DateTime, Local};
+use itertools::Itertools;
 use tracing::{event, Level, instrument};
 use x509_certificate::X509Certificate;
 use yaserde_derive::{YaDeserialize, YaSerialize};
-use base64::{Engine as _, engine::general_purpose};
 
-use crate::{NamedCertificate, DecodeError, client::{EnrollmentService, Policy}};
+use crate::{NamedCertificate, client::{EnrollmentService, Policy}, cmc::{rfc5272::AttributeValue, OidExt}};
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
@@ -70,6 +74,22 @@ struct PolicyOiDsType
 #[yaserde(prefix = "soap", namespace = "soap: http://www.w3.org/2003/05/soap-envelope")]
 pub struct GetPoliciesResponse
 {
+  #[yaserde(rename = "GetPoliciesResponse", prefix = "xcep")]
+  response: GetPoliciesResponseInner
+}
+
+impl GetPoliciesResponse
+{
+  pub fn into_policy(self, root_certificates: Vec<NamedCertificate>) -> Policy<CertificateAuthorityEndpoints>
+  {
+    self.response.into_policy(root_certificates)
+  }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
+#[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
+pub struct GetPoliciesResponseInner
+{
   #[yaserde(rename = "response", prefix = "xcep")]
   response: Response,
 
@@ -77,32 +97,52 @@ pub struct GetPoliciesResponse
   certificate_authorities: CertificateAuthorities,
 
   #[yaserde(rename = "oIDs", prefix = "xcep")]
-  oids: OiDsType
+  oids: ExtensionDefinitions
 }
 
-impl GetPoliciesResponse
+impl GetPoliciesResponseInner
 {
-  #[instrument]
+  #[instrument(skip_all)]
   pub fn into_policy(self, root_certificates: Vec<NamedCertificate>) -> Policy<CertificateAuthorityEndpoints>
   {
     let templates: Vec<_> = self.response.templates.templates
       .into_iter()
       .map(|template|
       {
+        let extensions = template.attributes.extensions.extensions.into_iter()
+          .group_by(|extension| extension.extension_definition_id).into_iter()
+          .map(|(oid_id, extensions)|
+          {
+            if let Some(oid) = self.oids.definitions.iter().find(|oid| oid.id == oid_id)
+            {
+              let values = extensions
+                .map(AttributeValue::try_from)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err: DecodeError<Infallible>| err.to_string())?;
+              Ok((Oid::parse(&oid.value)?, values))
+            }
+            else
+            {
+              Err(format!("oid reference id {} did not match any oids in the document", oid_id))
+            }
+          })
+          .collect::<Result<Vec<_>, _>>()?;
         let permission = template.attributes.permission.unwrap_or_default();
-        (template.certificate_authorities.ids, crate::client::CertificateTemplate
+        Ok((template.certificate_authorities.ids, crate::client::CertificateTemplate
         {
           cn: template.attributes.common_name,
           enroll: permission.enroll,
-          auto_enroll: permission.auto_enroll
-        })
+          auto_enroll: permission.auto_enroll,
+          extensions
+        }))
       })
+      .filter_map(|r| r.map_err(|e: DecodeError<_>| event!(Level::WARN, "invalid template: {}", e)).ok())
       .collect();
     let enrollment_services = self.certificate_authorities.cas
       .into_iter()
       .map(|ca|
       {
-        let certificate = X509Certificate::from_der(general_purpose::STANDARD.decode(ca.certificate)?)?;
+        let certificate = X509Certificate::from_der(general_purpose::STANDARD_NO_PAD.decode(ca.certificate).unwrap())?;
         let nickname = certificate.subject_common_name().unwrap_or_default();
         let certificate = NamedCertificate { nickname, certificate };
         Ok(EnrollmentService
@@ -115,7 +155,7 @@ impl GetPoliciesResponse
             .map(|template| template.1.cn.to_string()).collect()
         })
       })
-      .filter_map(|r| r.map_err(|e: DecodeError| event!(Level::WARN, "invalid enrollment service: {}", e)).ok())
+      .filter_map(|r| r.map_err(|e: DecodeError<_>| event!(Level::WARN, "invalid enrollment service: {}", e)).ok())
       .collect();
     Policy
     {
@@ -344,13 +384,23 @@ struct ExtensionsType
 struct Extension
 {
   #[yaserde(rename = "oIDReference", prefix = "xcep")]
-  o_id_reference: i32,
+  extension_definition_id: i32,
 
   #[yaserde(rename = "critical", prefix = "xcep")]
   critical: bool,
   
   #[yaserde(rename = "value", prefix = "xcep")]
-  value: String
+  value: Option<String>
+}
+
+impl TryFrom<Extension> for AttributeValue
+{
+  type Error = DecodeError<Infallible>;
+
+  fn try_from(value: Extension) -> Result<Self, Self::Error>
+  {
+    Ok(value.value.map(|x| AttributeValue::new(general_purpose::STANDARD.decode(x).expect("base64").try_into().expect("how"), bcder::Mode::Der).expect("attr")).unwrap_or_default())
+  }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
@@ -405,24 +455,24 @@ struct CertificateAuthorityEndpoint
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
-struct OiDsType
+struct ExtensionDefinitions
 {
   #[yaserde(rename = "oID", prefix = "xcep")]
-  o_ids: Vec<Oid>
+  definitions: Vec<ExtensionDefinition>
 }
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
-struct Oid
+struct ExtensionDefinition
 {
   #[yaserde(rename = "value", prefix = "xcep")]
-  value: Option<String>,
+  value: String,
   
   #[yaserde(rename = "group", prefix = "xcep")]
   group: u32,
   
   #[yaserde(rename = "oIDReferenceID", prefix = "xcep")]
-  o_id_reference_id: i32,
+  id: i32,
 
   #[yaserde(rename = "defaultName", prefix = "xcep")]
   default_name: String
