@@ -14,10 +14,9 @@ pub struct RequestSecurityToken
 
 impl RequestSecurityToken
 {
-  pub fn new(request: CmcRequest, request_id: impl Into<Option<String>>) -> Result<Self, CmsError>
+  pub fn new(request: &[u8], request_id: impl Into<Option<String>>) -> Self
   {
-    let request: Vec<u8> = request.try_into()?;
-    Ok(Self
+    Self
     {
       request: RequestSecurityTokenType
       {
@@ -27,7 +26,7 @@ impl RequestSecurityToken
         request_id: request_id.into(),
         context: None
       }
-    })
+    }
   }
 }
 
@@ -82,8 +81,16 @@ struct RequestedSecurityTokenType
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "wst", namespace = "wst: http://docs.oasis-open.org/ws-sx/ws-trust/200512")]
-pub struct RequestSecurityTokenResponseCollectionType
+struct RequestSecurityTokenResponseCollectionInner
 {
   #[yaserde(rename = "RequestSecurityTokenResponse", prefix = "wst")]
   request_security_token_responses: Vec<RequestSecurityTokenResponseType>
+}
+
+#[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
+#[yaserde(prefix = "soap", namespace = "soap: http://www.w3.org/2003/05/soap-envelope")]
+pub struct RequestSecurityTokenResponseCollection
+{
+  #[yaserde(rename = "RequestSecurityTokenResponseCollection", prefix = "wst")]
+  inner: RequestSecurityTokenResponseCollectionInner
 }

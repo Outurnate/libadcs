@@ -2,67 +2,52 @@ use std::{ops::{DerefMut, Deref}, io::Write, convert::Infallible};
 use auto_enums::auto_enum;
 use bcder::{Captured, encode::{self, PrimitiveContent}, decode::{Source, Constructed, DecodeError, IntoSource, Pos}, Tag, Mode, Integer};
 use bcder_derive::Values;
+use bytes::Bytes;
 use cryptographic_message_syntax::{Oid, asn1::rfc5652::ContentInfo};
 use x509_certificate::rfc2986::CertificationRequest;
+
+struct Bob(Bytes);
 
 macro_rules! AnyType
 {
   ($name:ident) =>
   {
-    #[derive(Clone)]
-    pub struct $name(Captured);
+    #[derive(Clone, Default)]
+    pub struct $name(Bytes);
 
     impl $name
     {
-      pub fn new(value: bytes::Bytes, mode: Mode) -> Result<Self, DecodeError<Infallible>>
+      pub fn new(value: Bytes) -> Self
       {
-        Ok(Self(Captured::new(value, mode, Pos::default())))
+        Self(value)
       }
-
+    
       pub fn from_constructed<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
       {
-        cons.take_constructed(|_, cons| Ok(Self(cons.capture_all()?)))
+        cons.take_constructed(|_, cons| Ok(Self(cons.capture_all()?.into_bytes())))
       }
-
+    
       pub fn opt_from_constructed<S: Source>(cons: &mut Constructed<S>) -> Result<Option<Self>, DecodeError<S::Error>>
       {
-        cons.take_opt_constructed(|_, cons| Ok(Self(cons.capture_all()?)))
+        cons.take_opt_constructed(|_, cons| Ok(Self(cons.capture_all()?.into_bytes())))
       }
-
+    
       pub fn take_from<S: Source>(cons: &mut Constructed<S>) -> Result<Self, DecodeError<S::Error>>
       {
-        Ok(Self(cons.capture_all()?))
+        Ok(Self(cons.capture_all()?.into_bytes()))
       }
     }
-
+    
     impl encode::Values for $name
     {
       fn encoded_len(&self, mode: Mode) -> usize
       {
-        self.0.encoded_len(mode)
+        self.0.len()
       }
-
+    
       fn write_encoded<W: Write>(&self, mode: Mode, target: &mut W) -> Result<(), std::io::Error>
       {
-        self.0.write_encoded(mode, target)
-      }
-    }
-
-    impl Deref for $name
-    {
-      type Target = Captured;
-
-      fn deref(&self) -> &Self::Target
-      {
-        &self.0
-      }
-    }
-
-    impl DerefMut for $name
-    {
-      fn deref_mut(&mut self) -> &mut Self::Target
-      {
-        &mut self.0
+        target.write_all(self.0.as_ref())
       }
     }
 
@@ -70,19 +55,11 @@ macro_rules! AnyType
     {
       fn eq(&self, other: &Self) -> bool
       {
-        self.0.as_slice() == other.0.as_slice()
+        self.0 == other.0
       }
     }
 
     impl Eq for $name {}
-
-    impl Default for $name
-    {
-      fn default() -> Self
-      {
-        Self(Captured::empty(Mode::Der))
-      }
-    }
   };
 }
 
@@ -141,14 +118,6 @@ AnyType!(AttributeValue);
 AnyType!(CertificateRequestMessage);
 AnyType!(RequestMessage);
 AnyType!(OtherMessageValue);
-
-impl AttributeValue
-{
-  pub fn decode_primitive(value: bytes::Bytes, mode: Mode) -> Result<Self, DecodeError<Infallible>>
-  {
-    Ok(Self(Constructed::decode(value, mode, |cons| cons.capture_all())?))
-  }
-}
 
 #[derive(Clone)]
 pub struct PKIData

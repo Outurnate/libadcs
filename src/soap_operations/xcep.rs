@@ -5,6 +5,7 @@ use bcder::{decode::DecodeError, Oid};
 use chrono::{DateTime, Local, SecondsFormat};
 use itertools::Itertools;
 use tracing::{event, Level, instrument};
+use url::Url;
 use x509_certificate::X509Certificate;
 use yaserde_derive::{YaDeserialize, YaSerialize};
 
@@ -99,7 +100,7 @@ pub struct GetPoliciesResponse
 
 impl GetPoliciesResponse
 {
-  pub fn into_policy(self) -> Policy<CertificateAuthorityEndpoints>
+  pub fn into_policy(self) -> Policy
   {
     self.response.into_policy()
   }
@@ -122,7 +123,7 @@ pub struct GetPoliciesResponseInner
 impl GetPoliciesResponseInner
 {
   #[instrument(skip_all)]
-  pub fn into_policy(self) -> Policy<CertificateAuthorityEndpoints>
+  pub fn into_policy(self) -> Policy
   {
     let templates: Vec<_> = self.response.templates.templates
       .into_iter()
@@ -164,15 +165,17 @@ impl GetPoliciesResponseInner
         let certificate = X509Certificate::from_der(general_purpose::STANDARD_NO_PAD.decode(ca.certificate).unwrap())?;
         let nickname = certificate.subject_common_name().unwrap_or_default();
         let certificate = NamedCertificate { nickname, certificate };
-        Ok(EnrollmentService
-        {
-          endpoint: ca.endpoints.unwrap_or_default(),
-          certificate,
-          template_names: templates
-            .iter()
-            .filter(|template| template.0.iter().any(|id| *id == ca.reference_id))
-            .map(|template| template.1.cn.to_string()).collect()
-        })
+        Ok(EnrollmentService::new
+          (
+            certificate,
+            templates
+              .iter()
+              .filter(|template| template.0.iter().any(|id| *id == ca.reference_id))
+              .map(|template| template.1.cn.to_string()).collect(),
+            ca.endpoints.map(|endpoints| endpoints.endpoints.iter().map(|endpoint|
+              (endpoint.client_authentication as ClientAuthentication, endpoint.renewal_only, Url::parse(&endpoint.uri).unwrap())).collect()).unwrap(),
+            None
+          ))
       })
       .filter_map(|r| r.map_err(|e: DecodeError<_>| event!(Level::WARN, "invalid enrollment service: {}", e)).ok())
       .collect();
@@ -417,7 +420,7 @@ impl TryFrom<Extension> for AttributeValue
 
   fn try_from(value: Extension) -> Result<Self, Self::Error>
   {
-    Ok(value.value.map(|x| AttributeValue::new(general_purpose::STANDARD.decode(x).expect("base64").try_into().expect("how"), bcder::Mode::Der).expect("attr")).unwrap_or_default())
+    Ok(value.value.map(|x| AttributeValue::new(general_purpose::STANDARD.decode(x).unwrap().try_into().unwrap())).unwrap_or_default())
   }
 }
 

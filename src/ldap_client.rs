@@ -2,9 +2,14 @@ use libdcerpc::{ms_icpr::{CertPassage, DWFlags, CertificateServerResponse}, Prot
 use tracing::{event, Level, instrument};
 use x509_certificate::X509Certificate;
 
-use crate::{ldap::{LdapManager, LdapError}, client::{EnrollmentService, CertificateTemplate, CertificateClientImplementation, Policy, EnrollmentResponse}};
+use crate::{ldap::{LdapManager, LdapError}, client::{EnrollmentService, CertificateTemplate, Policy, EnrollmentResponse}};
 
-pub struct LdapCertificateClient
+pub fn get_policy(ldap: &LdapManager) -> Result<Policy, ()>
+{
+  todo!()
+}
+
+/*pub struct LdapCertificateClient
 {
   enrollment_services: Vec<EnrollmentService<String>>,
   templates: Vec<CertificateTemplate>
@@ -16,10 +21,7 @@ impl CertificateClientImplementation for LdapCertificateClient
   type Response = CertificateServerResponse;
   type Error = LdapError;
 
-  fn get_policy(&self) -> Result<Policy<Self::Endpoint>, Self::Error>
-  {
-    todo!()
-  }
+
 
   #[instrument(skip(self))]
   fn submit(&self, request: Vec<u8>, enrollment_service: &EnrollmentService<Self::Endpoint>) -> Result<Self::Response, Self::Error>
@@ -67,4 +69,4 @@ impl LdapCertificateClient
       templates: ldap.get_certificate_templates()?
     })
   }
-}
+}*/

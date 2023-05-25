@@ -339,8 +339,8 @@ impl LdapManager
     }).collect::<Vec<_>>())
   }
 
-  #[instrument(skip(self))]
-  pub fn get_enrollment_service(&mut self) -> Result<Vec<EnrollmentService<String>>, LdapError>
+  //#[instrument(skip(self))]
+  pub fn get_enrollment_service(&mut self) -> Result<Vec<EnrollmentService>, LdapError>
   {
     let (rs, _) = self.ldap.search(&self.rootdse.enrollment_services, Scope::OneLevel, "(objectClass=pKIEnrollmentService)", vec!["cn", "dNSHostName", "cACertificate", "certificateTemplates"])?.success()?;
     Ok(rs.into_iter().filter_map(|rs|
@@ -361,7 +361,7 @@ impl LdapManager
         (Some(cn), Some(host_name), Some(certificate), Some(templates)) =>
         {
           event!(Level::INFO, "found enrollment service {}", cn);
-          Some(EnrollmentService { endpoint: host_name, certificate: NamedCertificate { nickname: cn, certificate }, template_names: templates })
+          Some(EnrollmentService::new(NamedCertificate { nickname: cn, certificate }, templates, vec![], Some(host_name)))
         },
         _ => None
       }
