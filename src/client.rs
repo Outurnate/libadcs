@@ -1,73 +1,23 @@
 use bcder::Oid;
+use itertools::Itertools;
 use thiserror::Error;
-use tracing::{event, Level, instrument};
 use url::Url;
 use x509_certificate::{rfc2986::CertificationRequest, X509Certificate};
 
-use crate::{ClientAuthentication, NamedCertificate, cmc::{rfc5272::AttributeValue, CmcRequestBuilder}, EncodeError, DecodeError, AdcsError, ldap::LdapManager, ldap_client, http_client};
+use crate::{ClientAuthentication, NamedCertificate, cmc::{rfc5272::AttributeValue, CmcRequestBuilder}, EncodeError, AdcsError, ldap::LdapManager, ldap_client, http_client};
 
 #[derive(Error, Debug)]
-pub enum ClientError
+pub enum ConfigurationError
 {
-  #[error("requested template {0} not found")]
-  TemplateNotFound(String),
+  #[error("https scheme specified, though libadcs was compiled without https support")]
+  NoHttpsSupport,
 
-  #[error("no enrollment service found for template {0}")]
-  NoEnrollmentServiceFound(String),
+  #[error("ldap scheme specified, though libadcs was compiled without https support")]
+  NoLdapSupport,
 
-  #[error("encoding error: {0}")]
-  EncodeFault(#[from] EncodeError),
-
-  #[error("decoding error: {0}")]
-  DecodeFault(#[from] DecodeError)
+  #[error("unknown scheme specified: {0}")]
+  UnknownScheme(String)
 }
-
-pub fn get_policy(uri: &Url, flags: &(), client_authentication: &ClientAuthentication, cost: &u64, ldap: &mut LdapManager) -> Result<Policy, AdcsError>
-{
-  match uri.scheme().to_lowercase().as_str()
-  {
-    "https" =>
-    {
-      if cfg!(feature = "policy_https")
-      {
-        Ok(Some(http_client::get_policy(uri)?))
-      }
-      else
-      {
-        event!(Level::WARN, "https scheme specified, though libadcs was compiled without https support.  ignoring");
-        Ok(None)
-      }
-    },
-    "ldap" =>
-    {
-      if cfg!(feature = "policy_ldap")
-      {
-        Ok(Some(ldap_client::get_policy(ldap)?))
-      }
-      else
-      {
-        event!(Level::WARN, "ldap scheme specified, though libadcs was compiled without ldap support.  ignoring");
-        Ok(None)
-      }
-    },
-    scheme =>
-    {
-      event!(Level::WARN, "unknown scheme specified: {}", scheme);
-      Ok(None)
-    }
-  }
-}
-
-/*
-  pub fn get_policy(&self) -> Result<Policy, AdcsError>
-  {
-    todo!()
-  }
-
-  pub fn get_name(&self) -> &'_ str
-  {
-    todo!()
-  } */
 
 pub trait EnrollmentClient
 {
@@ -85,47 +35,91 @@ pub enum EnrollmentResponse
   Rejected(String)
 }
 
+#[derive(Debug, Clone)]
 pub struct Policy
 {
+  id: String,
   enrollment_services: Vec<EnrollmentService>,
-  templates: Vec<CertificateTemplate>
+  templates: Vec<CertificateTemplate>,
+  root_certificates: Vec<NamedCertificate>,
+  intermediate_certificates: Vec<NamedCertificate>
 }
 
 impl Policy
 {
-  pub fn get_id(&self) -> &'_ str
+  pub fn new(uri: &Url, flags: &(), client_authentication: &ClientAuthentication, cost: &u64, ldap: &mut LdapManager) -> Result<Policy, AdcsError>
   {
-    todo!()
+    let root_certificates = ldap.get_root_certificates()?;
+    match uri.scheme().to_lowercase().as_str()
+    {
+      "https" =>
+      {
+        if cfg!(feature = "policy_https")
+        {
+          Ok(http_client::get_policy(root_certificates, uri)?)
+        }
+        else
+        {
+          Err(ConfigurationError::NoHttpsSupport.into())
+        }
+      },
+      "ldap" =>
+      {
+        if cfg!(feature = "policy_ldap")
+        {
+          Ok(ldap_client::get_policy(root_certificates, ldap)?)
+        }
+        else
+        {
+          Err(ConfigurationError::NoLdapSupport.into())
+        }
+      },
+      scheme =>
+      {
+        Err(ConfigurationError::UnknownScheme(scheme.to_owned()).into())
+      }
+    }
   }
 
-  pub fn get_enrollment_services_for_template(&self, template_name: &str) -> Result<impl Iterator<Item = EnrollmentService>, AdcsError>
+  pub fn get_id(&self) -> &'_ str
   {
-    if let Some(template) = self.templates.iter().find(|x| x.cn == template_name)
+    &self.id
+  }
+
+  pub fn get_enrollment_services_for_template(&self, template_name: String) -> Result<impl Iterator<Item = &'_ EnrollmentService>, AdcsError>
+  {
+    if self.templates.iter().find(|x| x.cn == template_name).is_some()
     {
-      let mut enrollment_services = self.enrollment_services
+      let enrollment_services = self.enrollment_services
         .iter()
-        .filter(|enrollment_service| enrollment_service.has_template(template_name))
-        .peekable();
-      if enrollment_services.peek().is_none()
-      {
-        Err(AdcsError::Client(ClientError::NoEnrollmentServiceFound(template_name.to_owned())))
-      }
-      else
-      {
-        Ok(enrollment_services)
-      }
+        .filter(move |enrollment_service| enrollment_service.has_template(&template_name));
+      Ok(enrollment_services)
     }
     else
     {
-      Err(AdcsError::Client(ClientError::TemplateNotFound(template_name.to_owned())))
+      Err(AdcsError::TemplateNotFound(template_name))
     }
+  }
+
+  pub fn get_templates(&self) -> impl Iterator<Item = &'_ str>
+  {
+    self.templates.iter().map(|template| template.cn.as_str())
   }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct HttpsEndpoint
+{
+  client_authentication: ClientAuthentication,
+  renewal_only: bool,
+  uri: Url,
+  priority: u64
+}
+
+#[derive(Debug, Clone)]
 pub struct EnrollmentService
 {
-  https_endpoints: Vec<(ClientAuthentication, bool, Url)>,
+  https_endpoints: Vec<HttpsEndpoint>,
   rpc_endpoint: Option<String>,
   certificate: NamedCertificate,
   template_names: Vec<String>
@@ -133,16 +127,14 @@ pub struct EnrollmentService
 
 impl EnrollmentService
 {
-  pub fn new(certificate: NamedCertificate, template_names: Vec<String>, https_endpoints: Vec<(ClientAuthentication, bool, Url)>, rpc_endpoint: Option<String>) -> Self
+  pub fn new(certificate: NamedCertificate, template_names: Vec<String>, https_endpoints: Vec<HttpsEndpoint>, rpc_endpoint: Option<String>) -> Self
   {
     Self { https_endpoints, rpc_endpoint, certificate, template_names }
   }
 
-  #[instrument]
-  pub fn find_https_endpoints(&self, client_authentication: ClientAuthentication, renewing: bool) -> Vec<Url>
+  pub fn find_https_endpoints(&self, client_authentication: ClientAuthentication, renewing: bool) -> impl Iterator<Item = &'_ Url>
   {
-    let client_authentication = client_authentication as u32;
-    self.endpoints
+    self.https_endpoints
       .iter()
       .filter(|endpoint|
         {
@@ -157,15 +149,7 @@ impl EnrollmentService
         })
       .filter(|endpoint| endpoint.client_authentication == client_authentication)
       .sorted_by(|a, b| Ord::cmp(&a.priority, &b.priority))
-      .filter_map(|endpoint| match Url::parse(&endpoint.uri)
-      {
-        Ok(url) => Some(url),
-        Err(err) =>
-        {
-          event!(Level::WARN, "ignoring endpoint due to invalid url.  endpoint is {:?}.  url error is {}", endpoint, err);
-          None
-        }
-      })
+      .map(|endpoint| &endpoint.uri)
   }
 
   pub fn find_rpc_endpoint(&self) -> &Option<String>
@@ -177,8 +161,14 @@ impl EnrollmentService
   {
     self.template_names.iter().any(|x| template_name == x)
   }
+
+  pub fn get_certificate(&self) -> &'_ NamedCertificate
+  {
+    &self.certificate
+  }
 }
 
+#[derive(Debug, Clone)]
 pub struct CertificateTemplate
 {
   pub cn: String,

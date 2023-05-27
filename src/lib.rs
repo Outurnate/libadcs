@@ -17,7 +17,7 @@ use itertools::Itertools;
 pub use reqwest::Url;
 pub use client::EnrollmentResponse;
 
-use client::{ClientError, Policy, get_policy};
+use client::{Policy, ConfigurationError};
 use soap::SoapHttpError;
 use tracing::{event, Level};
 use std::{fmt::Display, collections::HashMap, cmp::Ordering};
@@ -47,9 +47,6 @@ impl Display for NamedCertificate
 #[derive(Error, Debug)]
 pub enum AdcsError
 {
-  #[error("client error: {0}")]
-  Client(#[from] ClientError),
-
   #[error("ldap error: {0}")]
   Ldap(#[from] LdapError),
 
@@ -57,7 +54,16 @@ pub enum AdcsError
   Soap(#[from] SoapHttpError),
 
   #[error("policy id not found: {0}")]
-  PolicyIdNotFound(String)
+  PolicyIdNotFound(String),
+
+  #[error("no policies for id {0}")]
+  NoPolicies(String),
+
+  #[error("no such template {0}")]
+  TemplateNotFound(String),
+
+  #[error("error in client configuration: {0}")]
+  ConfigurationError(#[from] ConfigurationError)
 }
 
 pub type Result<T> = std::result::Result<T, AdcsError>;
@@ -126,12 +132,11 @@ impl Ord for PolicyEndpoint
   }
 }
 
+#[derive(Debug, Clone)]
 pub struct CertificateServicesClient
 {
   default_policy_id: String,
-  policies: HashMap<String, Policy>,
-  root_certificates: Vec<NamedCertificate>,
-  chain_certificates: Vec<NamedCertificate>
+  policies: HashMap<String, Vec<Policy>>
 }
 
 impl CertificateServicesClient
@@ -139,17 +144,11 @@ impl CertificateServicesClient
   pub fn new(domain: String, default_policy_id: String, policy_endpoints: Vec<PolicyEndpoint>) -> Result<Self>
   {
     let mut ldap = LdapManager::new(domain, false)?;
-    let root_certificates = ldap.get_root_certificates()?;
-    let chain_certificates = ldap.get_ca_certificates()?
-      .into_iter()
-      .filter(|ca| !root_certificates.contains(ca))
-      .collect();
-
     let policies = policy_endpoints
       .into_iter()
       .filter_map(|endpoint|
       {
-        match get_policy(&endpoint.uri, &endpoint.flags, &endpoint.client_authentication, &endpoint.cost, &mut ldap)
+        match Policy::new(&endpoint.uri, &endpoint.flags, &endpoint.client_authentication, &endpoint.cost, &mut ldap)
         {
           Ok(policy) => Some((endpoint, policy.get_id(), policy)),
           Err(err) =>
@@ -161,36 +160,25 @@ impl CertificateServicesClient
       })
       .group_by(|(_, key, _)| key)
       .into_iter()
-      .filter_map(|(policy_id, policies)|
+      .map(|(policy_id, policies)|
       {
-        if let Some(policy) = policies.sorted_by(|(a, _, _), (b, _, _)| Ord::cmp(a, b)).map(|(_, _, policy)| policy).next()
-        {
-          Some(((*policy_id).to_owned(), policy))
-        }
-        else
-        {
-          event!(Level::WARN, "no working endpoints for policy, ignoring");
-          None
-          // ok this is literally unreachable....this whole statement must be crap
-        }
+        ((*policy_id).to_owned(), policies.sorted_by(|(a, _, _), (b, _, _)| Ord::cmp(a, b)).map(|(_, _, policy)| policy).collect())
       })
       .collect();
 
     Ok(Self
     {
       default_policy_id,
-      policies,
-      root_certificates,
-      chain_certificates
+      policies
     })
   }
 
-  fn get_policy(&mut self, policy_id: impl Into<Option<String>>) -> Result<&'_ Policy>
+  fn get_policy(&self, policy_id: impl Into<Option<String>>) -> Result<(String, impl Iterator<Item = &'_ Policy>)>
   {
     let policy_id = policy_id.into().unwrap_or(self.default_policy_id.clone());
     if let Some(policy) = self.policies.get(&policy_id)
     {
-      Ok(policy)
+      Ok((policy_id, policy.iter()))
     }
     else
     {
@@ -198,19 +186,17 @@ impl CertificateServicesClient
     }
   }
 
-  pub fn root_certificates(&self) -> &Vec<NamedCertificate>
+  pub fn template_names<'a>(&self, policy_id: impl Into<Option<String>>) -> Result<impl Iterator<Item = &'_ str>>
   {
-    &self.root_certificates
-  }
-
-  pub fn chain_certificates(&self) -> &Vec<NamedCertificate>
-  {
-    &self.chain_certificates
-  }
-
-  pub fn template_names<'a>(&self, policy_id: impl Into<Option<String>>) -> Result<Vec<String>>
-  {
-    self.get_policy(policy_id)?.get_templates()
+    let (policy_id, mut policy) = self.get_policy(policy_id)?;
+    if let Some(policy) = policy.next()
+    {
+      Ok(policy.get_templates())
+    }
+    else
+    {
+      Err(AdcsError::NoPolicies(policy_id))
+    }
   }
 
   pub fn submit(&self, request: CertificationRequest, template: &str) -> Result<EnrollmentResponse>

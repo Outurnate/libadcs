@@ -339,7 +339,7 @@ impl LdapManager
     }).collect::<Vec<_>>())
   }
 
-  //#[instrument(skip(self))]
+  #[instrument(skip(self))]
   pub fn get_enrollment_service(&mut self) -> Result<Vec<EnrollmentService>, LdapError>
   {
     let (rs, _) = self.ldap.search(&self.rootdse.enrollment_services, Scope::OneLevel, "(objectClass=pKIEnrollmentService)", vec!["cn", "dNSHostName", "cACertificate", "certificateTemplates"])?.success()?;
@@ -368,10 +368,10 @@ impl LdapManager
     }).collect())
   }
 
-  pub fn get_ca_certificates(&mut self) -> Result<Vec<NamedCertificate>, LdapError>
+  /*pub fn get_ca_certificates(&mut self) -> Result<impl Iterator<Item = &'_ NamedCertificate>, LdapError>
   {
-    Ok(self.get_enrollment_service()?.into_iter().map(|enrollment_service| enrollment_service.certificate).collect())
-  }
+    Ok(self.get_enrollment_service()?.iter().map(|enrollment_service| enrollment_service.get_certificate()))
+  }*/
 }
 
 #[derive(Debug)]

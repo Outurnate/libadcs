@@ -1,6 +1,6 @@
-use std::{ops::{DerefMut, Deref}, io::Write, convert::Infallible};
+use std::io::Write;
 use auto_enums::auto_enum;
-use bcder::{Captured, encode::{self, PrimitiveContent}, decode::{Source, Constructed, DecodeError, IntoSource, Pos}, Tag, Mode, Integer};
+use bcder::{encode::{self, PrimitiveContent}, decode::{Source, Constructed, DecodeError, IntoSource}, Tag, Mode, Integer};
 use bcder_derive::Values;
 use bytes::Bytes;
 use cryptographic_message_syntax::{Oid, asn1::rfc5652::ContentInfo};
@@ -12,7 +12,7 @@ macro_rules! AnyType
 {
   ($name:ident) =>
   {
-    #[derive(Clone, Default)]
+    #[derive(Clone, Default, Debug)]
     pub struct $name(Bytes);
 
     impl $name

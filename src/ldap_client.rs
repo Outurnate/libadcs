@@ -4,12 +4,12 @@ use x509_certificate::X509Certificate;
 
 use crate::{ldap::{LdapManager, LdapError}, client::{EnrollmentService, CertificateTemplate, Policy, EnrollmentResponse}};
 
-pub fn get_policy(ldap: &LdapManager) -> Result<Policy, ()>
+pub fn get_policy(root_certificates: Vec<NamedCertificate>, ldap: &LdapManager) -> Result<Policy, LdapError>
 {
   todo!()
 }
 
-/*pub struct LdapCertificateClient
+pub struct LdapCertificateClient
 {
   enrollment_services: Vec<EnrollmentService<String>>,
   templates: Vec<CertificateTemplate>
@@ -69,4 +69,4 @@ impl LdapCertificateClient
       templates: ldap.get_certificate_templates()?
     })
   }
-}*/
+}
