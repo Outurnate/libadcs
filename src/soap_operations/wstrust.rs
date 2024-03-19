@@ -1,6 +1,5 @@
-use cryptographic_message_syntax::CmsError;
 use yaserde_derive::{YaDeserialize, YaSerialize};
-use crate::cmc::CmcRequest;
+use crate::EnrollmentResponse;
 
 use super::wsse::BinarySecurityTokenType;
 
@@ -93,4 +92,12 @@ pub struct RequestSecurityTokenResponseCollection
 {
   #[yaserde(rename = "RequestSecurityTokenResponseCollection", prefix = "wst")]
   inner: RequestSecurityTokenResponseCollectionInner
+}
+
+impl From<RequestSecurityTokenResponseCollection> for EnrollmentResponse
+{
+  fn from(value: RequestSecurityTokenResponseCollection) -> Self
+  {
+    todo!()
+  }
 }

@@ -11,8 +11,9 @@ use tracing::{event, Level, instrument};
 use trust_dns_resolver::ConnectionProvider;
 use trust_dns_resolver::error::ResolveError;
 use trust_dns_resolver::proto::DnsHandle;
-use crate::client::{EnrollmentService, CertificateTemplate};
+use crate::client::EnrollmentService;
 use crate::NamedCertificate;
+use crate::CertificateTemplate;
 use crate::sddl::{SDDL, AUTO_ENROLL, ENROLL, SID};
 use x509_certificate::certificate::X509Certificate;
 use trust_dns_resolver::{AsyncResolver, name_server::{GenericConnection, GenericConnectionProvider}};
@@ -306,7 +307,7 @@ impl LdapManager
 
       match (cn, permissions)
       {
-        (Some(cn), Some((enroll, auto_enroll))) => Some(CertificateTemplate { cn, enroll, auto_enroll, extensions: vec![] }),
+        (Some(cn), Some((enroll, auto_enroll))) => Some(CertificateTemplate::new(cn, enroll, auto_enroll, vec![])),
         _ => None
       }
     }).collect())
@@ -368,10 +369,10 @@ impl LdapManager
     }).collect())
   }
 
-  /*pub fn get_ca_certificates(&mut self) -> Result<impl Iterator<Item = &'_ NamedCertificate>, LdapError>
+  pub fn get_id(&mut self) -> Result<String, LdapError>
   {
-    Ok(self.get_enrollment_service()?.iter().map(|enrollment_service| enrollment_service.get_certificate()))
-  }*/
+    todo!()
+  }
 }
 
 #[derive(Debug)]

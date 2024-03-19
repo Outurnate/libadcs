@@ -6,8 +6,6 @@ use bytes::Bytes;
 use cryptographic_message_syntax::{Oid, asn1::rfc5652::ContentInfo};
 use x509_certificate::rfc2986::CertificationRequest;
 
-struct Bob(Bytes);
-
 macro_rules! AnyType
 {
   ($name:ident) =>
@@ -15,6 +13,7 @@ macro_rules! AnyType
     #[derive(Clone, Default, Debug)]
     pub struct $name(Bytes);
 
+    #[allow(dead_code)]
     impl $name
     {
       pub fn new(value: Bytes) -> Self

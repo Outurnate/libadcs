@@ -1,6 +1,8 @@
 #![warn(clippy::unwrap_used)]
 #![forbid(unsafe_code)]
 
+extern crate num_derive;
+
 mod ldap;
 mod sddl;
 mod cmc;
@@ -13,17 +15,18 @@ mod ldap_client;
 #[cfg(feature = "policy_https")]
 mod http_client;
 
-use itertools::Itertools;
+use num_derive::FromPrimitive;
+use client::ConfigurationError;
+use soap::SoapHttpError;
+use std::{fmt::{Display, Formatter}, cmp::Ordering};
+use ldap::LdapError;
+use thiserror::Error;
+use x509_certificate::X509Certificate;
+
 pub use reqwest::Url;
 pub use client::EnrollmentResponse;
-
-use client::{Policy, ConfigurationError};
-use soap::SoapHttpError;
-use tracing::{event, Level};
-use std::{fmt::Display, collections::HashMap, cmp::Ordering};
-use ldap::{LdapManager, LdapError};
-use thiserror::Error;
-use x509_certificate::{X509Certificate, rfc2986::CertificationRequest};
+pub use client::CertificateTemplate;
+pub use client::Policy;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NamedCertificate
@@ -70,10 +73,11 @@ pub type Result<T> = std::result::Result<T, AdcsError>;
 
 // MS-XCEP 3.1.4.1.3.5
 #[repr(u32)]
-#[derive(PartialOrd, Ord, PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(PartialOrd, Ord, PartialEq, Eq, Debug, Clone, Copy, FromPrimitive, Default)]
 pub enum ClientAuthentication
 {
   TransportKerberos = 2,
+  #[default]
   Anonymous = 1,
   SoapUsernamePassword = 4,
   CmsSignature = 8
@@ -83,9 +87,16 @@ pub enum ClientAuthentication
 pub struct PolicyEndpoint
 {
   uri: Url,
-  flags: (),
   client_authentication: ClientAuthentication,
   cost: u64
+}
+
+impl Display for PolicyEndpoint
+{
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+  {
+    f.write_str(self.uri.as_str())
+  }
 }
 
 // cost, ASCENDING
@@ -105,7 +116,6 @@ impl PartialEq for PolicyEndpoint
 {
   fn eq(&self, other: &Self) -> bool
   {
-    self.flags == other.flags &&
     self.client_authentication == other.client_authentication &&
     self.cost == other.cost
   }
@@ -119,89 +129,9 @@ impl Ord for PolicyEndpoint
   {
     match self.cost.cmp(&other.cost)
     {
-      Ordering::Equal =>
-      {
-        match self.client_authentication.cmp(&other.client_authentication)
-        {
-          Ordering::Equal => self.flags.cmp(&other.flags),
-          ord => ord
-        }
-      },
+      Ordering::Equal => self.client_authentication.cmp(&other.client_authentication),
       ord => ord
     }
-  }
-}
-
-#[derive(Debug, Clone)]
-pub struct CertificateServicesClient
-{
-  default_policy_id: String,
-  policies: HashMap<String, Vec<Policy>>
-}
-
-impl CertificateServicesClient
-{
-  pub fn new(domain: String, default_policy_id: String, policy_endpoints: Vec<PolicyEndpoint>) -> Result<Self>
-  {
-    let mut ldap = LdapManager::new(domain, false)?;
-    let policies = policy_endpoints
-      .into_iter()
-      .filter_map(|endpoint|
-      {
-        match Policy::new(&endpoint.uri, &endpoint.flags, &endpoint.client_authentication, &endpoint.cost, &mut ldap)
-        {
-          Ok(policy) => Some((endpoint, policy.get_id(), policy)),
-          Err(err) =>
-          {
-            event!(Level::WARN, "failed to get policy for endpoint {:?}: {}", endpoint, err);
-            None
-          }
-        }
-      })
-      .group_by(|(_, key, _)| key)
-      .into_iter()
-      .map(|(policy_id, policies)|
-      {
-        ((*policy_id).to_owned(), policies.sorted_by(|(a, _, _), (b, _, _)| Ord::cmp(a, b)).map(|(_, _, policy)| policy).collect())
-      })
-      .collect();
-
-    Ok(Self
-    {
-      default_policy_id,
-      policies
-    })
-  }
-
-  fn get_policy(&self, policy_id: impl Into<Option<String>>) -> Result<(String, impl Iterator<Item = &'_ Policy>)>
-  {
-    let policy_id = policy_id.into().unwrap_or(self.default_policy_id.clone());
-    if let Some(policy) = self.policies.get(&policy_id)
-    {
-      Ok((policy_id, policy.iter()))
-    }
-    else
-    {
-      Err(AdcsError::PolicyIdNotFound(policy_id))
-    }
-  }
-
-  pub fn template_names<'a>(&self, policy_id: impl Into<Option<String>>) -> Result<impl Iterator<Item = &'_ str>>
-  {
-    let (policy_id, mut policy) = self.get_policy(policy_id)?;
-    if let Some(policy) = policy.next()
-    {
-      Ok(policy.get_templates())
-    }
-    else
-    {
-      Err(AdcsError::NoPolicies(policy_id))
-    }
-  }
-
-  pub fn submit(&self, request: CertificationRequest, template: &str) -> Result<EnrollmentResponse>
-  {
-    todo!()
   }
 }
 

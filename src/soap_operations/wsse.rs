@@ -15,9 +15,9 @@ pub struct BinarySecurityTokenType
   encoding_type: Option<String>
 }
 
-impl From<Vec<u8>> for BinarySecurityTokenType
+impl From<&[u8]> for BinarySecurityTokenType
 {
-  fn from(value: Vec<u8>) -> Self
+  fn from(value: &[u8]) -> Self
   {
     Self
     {

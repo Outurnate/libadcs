@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, str::FromStr};
 
 use base64::{engine::general_purpose, Engine};
 use bcder::{decode::DecodeError, Oid};
@@ -8,8 +8,9 @@ use tracing::{event, Level, instrument};
 use url::Url;
 use x509_certificate::X509Certificate;
 use yaserde_derive::{YaDeserialize, YaSerialize};
+use num_traits::FromPrimitive;
 
-use crate::{NamedCertificate, client::{EnrollmentService, Policy}, cmc::{rfc5272::AttributeValue, OidExt}};
+use crate::{NamedCertificate, client::{EnrollmentService, Policy, HttpsEndpoint}, cmc::rfc5272::AttributeValue, ClientAuthentication};
 
 #[derive(Clone, Debug, Default, PartialEq, YaDeserialize, YaSerialize)]
 #[yaserde(prefix = "xcep", namespace = "xcep: http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy")]
@@ -100,9 +101,9 @@ pub struct GetPoliciesResponse
 
 impl GetPoliciesResponse
 {
-  pub fn into_policy(self) -> Policy
+  pub fn into_policy(self, root_certificates: Vec<NamedCertificate>) -> Policy
   {
-    self.response.into_policy()
+    self.response.into_policy(root_certificates)
   }
 }
 
@@ -123,7 +124,7 @@ pub struct GetPoliciesResponseInner
 impl GetPoliciesResponseInner
 {
   #[instrument(skip_all)]
-  pub fn into_policy(self) -> Policy
+  pub fn into_policy(self, root_certificates: Vec<NamedCertificate>) -> Policy
   {
     let templates: Vec<_> = self.response.templates.templates
       .into_iter()
@@ -139,7 +140,7 @@ impl GetPoliciesResponseInner
                 .map(AttributeValue::try_from)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|err: DecodeError<Infallible>| err.to_string())?;
-              Ok((Oid::parse(&oid.value)?, values))
+              Ok((Oid::from_str(&oid.value)?, values))
             }
             else
             {
@@ -148,13 +149,7 @@ impl GetPoliciesResponseInner
           })
           .collect::<Result<Vec<_>, _>>()?;
         let permission = template.attributes.permission.unwrap_or_default();
-        Ok((template.certificate_authorities.ids, crate::client::CertificateTemplate
-        {
-          cn: template.attributes.common_name,
-          enroll: permission.enroll,
-          auto_enroll: permission.auto_enroll,
-          extensions
-        }))
+        Ok((template.certificate_authorities.ids, crate::CertificateTemplate::new(template.attributes.common_name, permission.enroll, permission.auto_enroll, extensions)))
       })
       .filter_map(|r| r.map_err(|e: DecodeError<_>| event!(Level::WARN, "invalid template: {}", e)).ok())
       .collect();
@@ -171,19 +166,15 @@ impl GetPoliciesResponseInner
             templates
               .iter()
               .filter(|template| template.0.iter().any(|id| *id == ca.reference_id))
-              .map(|template| template.1.cn.to_string()).collect(),
+              .map(|template| template.1.get_name().to_string()).collect(),
             ca.endpoints.map(|endpoints| endpoints.endpoints.iter().map(|endpoint|
-              (endpoint.client_authentication as ClientAuthentication, endpoint.renewal_only, Url::parse(&endpoint.uri).unwrap())).collect()).unwrap(),
+              HttpsEndpoint::new(ClientAuthentication::from_u32(endpoint.client_authentication).unwrap_or_default(), endpoint.renewal_only, Url::parse(&endpoint.uri).unwrap(), endpoint.priority)).collect()).unwrap(),
             None
           ))
       })
       .filter_map(|r| r.map_err(|e: DecodeError<_>| event!(Level::WARN, "invalid enrollment service: {}", e)).ok())
       .collect();
-    Policy
-    {
-      enrollment_services,
-      templates: templates.into_iter().map(|template| template.1).collect()
-    }
+    Policy::new_inner(self.response.policy_id, enrollment_services, templates.into_iter().map(|template| template.1).collect(), root_certificates)
   }
 }
 
@@ -192,7 +183,7 @@ impl GetPoliciesResponseInner
 struct Response
 {
   #[yaserde(rename = "policyID", prefix = "xcep")]
-  policy_id: Option<String>,
+  policy_id: String,
 
   #[yaserde(rename = "policyFriendlyName", prefix = "xcep")]
   policy_friendly_name: String,

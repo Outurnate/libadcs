@@ -1,13 +1,5 @@
-use std::{io::{Read, Write}, borrow::Borrow};
-
-use base64::{engine::general_purpose, Engine};
-use bcder::Oid;
-use bytes::Bytes;
-use tracing::instrument;
-use xml::{reader, writer, attribute::OwnedAttribute};
-use xmltree::{Element, Namespace};
-use yaserde::{de::{self, Deserializer}, ser::{self, Serializer}, YaDeserialize, YaSerialize};
-use crate::cmc::OidExt;
+use xmltree::Element;
+use yaserde::{de, ser::{self, Serializer}};
 use super::SoapError;
 
 pub trait ElementExt

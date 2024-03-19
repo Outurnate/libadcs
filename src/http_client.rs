@@ -10,7 +10,7 @@ pub fn get_policy(root_certificates: Vec<NamedCertificate>, endpoint: &Url) -> R
     .build()?;
   let client = SoapClient::new();
   let response: GetPoliciesResponse = client.invoke(&header, &GetPoliciesRequest::default())?;
-  Ok(response.into_policy())
+  Ok(response.into_policy(root_certificates))
 }
 
 fn submit(request: &[u8], endpoint: Url) -> Result<EnrollmentResponse, SoapHttpError>
