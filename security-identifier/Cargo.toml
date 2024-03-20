@@ -1,0 +1,17 @@
+[package]
+name = "security-identifier"
+version = "0.1.0"
+edition = "2021"
+authors = ["Joe Dillon", "Joe Dillon <joseph@outurnate.com>"]
+description = "Windows security identifier primitive"
+documentation = "https://docs.rs/security-identifier"
+readme = "README.md"
+homepage = "https://github.com/outurnate/libadcs/"
+repository = "https://github.com/outurnate/libadcs/"
+license = "MIT OR Apache-2.0"
+keywords = ["serialization", "parsing", "utility", "windows", "library"]
+
+[dependencies]
+byteorder = "1.5.0"
+nom = "7.1.3"
+thiserror = "1.0.58"

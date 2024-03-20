@@ -1,6 +1,0 @@
-[submodule "cryptography-rs"]
-	path = cryptography-rs
-	url = git@github.com:Outurnate/cryptography-rs.git
-[submodule "bcder"]
-	path = bcder
-	url = git@github.com:Outurnate/bcder.git

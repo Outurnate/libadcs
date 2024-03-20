@@ -1,0 +1,21 @@
+[package]
+name = "ldap3-disco"
+version = "0.1.0"
+edition = "2021"
+authors = ["Joe Dillon", "Joe Dillon <joseph@outurnate.com>"]
+description = "Active Directory LDAP service discovery"
+documentation = "https://docs.rs/ldap3-disco"
+readme = "README.md"
+homepage = "https://github.com/outurnate/libadcs/"
+repository = "https://github.com/outurnate/libadcs/"
+license = "MIT OR Apache-2.0"
+keywords = ["serialization", "parsing", "utility", "windows", "library"]
+
+[dependencies]
+trust-dns-resolver = { version = "0.23.2" }
+ldap3 = { version = "0.11.1", default-features = false, features = ["native-tls"] }
+deadpool = "0.10.0"
+itertools = "0.12.1"
+rand = "0.8.5"
+tracing = "0.1.40"
+tokio = { version = "1.36.0", default-features = false, features = ["rt"] }
